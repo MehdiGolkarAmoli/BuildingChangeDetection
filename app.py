@@ -464,8 +464,8 @@ def load_model(model_path):
             decoder_attention_type='scse'
         ).to(device)
         
-        # Load the checkpoint with proper map_location
-        checkpoint = torch.load(model_path, map_location=device)
+        # Explicitly set weights_only=False as mentioned in the error message
+        checkpoint = torch.load(model_path, map_location=device, weights_only=False)
         
         # Handle different checkpoint formats
         if isinstance(checkpoint, dict) and 'state_dict' in checkpoint:
