@@ -464,7 +464,15 @@ def load_model(model_path):
             decoder_attention_type='scse'
         ).to(device)
         
-        checkpoint = torch.load(model_path, map_location=device, weights_only=False)
+        # checkpoint = torch.load(model_path, map_location=device, weights_only=False)
+        checkpoint = torch.load('best_model_version_unet++_with_attention_e7.pt')
+        if 'state_dict' in checkpoint:
+            model.load_state_dict(checkpoint['state_dict'])
+        elif 'model_state_dict' in checkpoint:
+            model.load_state_dict(checkpoint['model_state_dict'])
+        else:
+    # It might be a direct state dict
+    model.load_state_dict(checkpoint)
         model.load_state_dict(checkpoint['model_state_dict'])
         model.eval()
         return model, device
