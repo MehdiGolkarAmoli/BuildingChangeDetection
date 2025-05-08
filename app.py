@@ -453,19 +453,26 @@ def apply_erosion(image, kernel_size):
 
 # Load model function
 @st.cache_resource
+@st.cache_resource
 def load_model(model_path):
     try:
         device = torch.device('cpu')
         model = smp.UnetPlusPlus(
             encoder_name='efficientnet-b7', 
             encoder_weights='imagenet', 
-            in_channels=12,  # 12 bands for Sentinel-2
+            in_channels=12,
             classes=1, 
             decoder_attention_type='scse'
         ).to(device)
         
-        # Explicitly set weights_only=False as mentioned in the error message
-        checkpoint = torch.load(model_path, map_location=device, weights_only=False)
+        # Try with pickle_module=torch.serialization.pickle
+        try:
+            checkpoint = torch.load(model_path, map_location=device)
+        except Exception as e:
+            st.warning(f"Standard loading failed, trying legacy loading: {str(e)}")
+            # Try with older loading method
+            import pickle
+            checkpoint = torch.load(model_path, map_location=device, pickle_module=pickle)
         
         # Handle different checkpoint formats
         if isinstance(checkpoint, dict) and 'state_dict' in checkpoint:
@@ -481,6 +488,7 @@ def load_model(model_path):
     except Exception as e:
         st.error(f"Error loading model: {str(e)}")
         return None, None
+
 
 # Function to process image with better error handling for non-overlapping geometries
 def process_image(image_path, year, selected_polygon, region_number):
