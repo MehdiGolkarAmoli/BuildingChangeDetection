@@ -18,7 +18,7 @@ earthengine-api==1.5.11
 geojson==3.0.1
 
 # Deep learning
-torch==2.3.1
+torch==2.3.0
 torchvision==0.18.0
 efficientnet-pytorch==0.7.1
 segmentation-models-pytorch==0.4.0
