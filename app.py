@@ -454,10 +454,14 @@ def apply_erosion(image, kernel_size):
 # Load model function
 @st.cache_resource
 @st.cache_resource
-@st.cache_resource
 def load_model(model_path):
     try:
+        st.info(f"Loading model from {model_path}")
+        st.info(f"PyTorch version: {torch.__version__}")
+        
         device = torch.device('cpu')
+        
+        # Create the model architecture
         model = smp.UnetPlusPlus(
             encoder_name='efficientnet-b7', 
             encoder_weights='imagenet', 
@@ -466,25 +470,62 @@ def load_model(model_path):
             decoder_attention_type='scse'
         ).to(device)
         
-        # Explicitly set weights_only=False as mentioned in the error message
-        checkpoint = torch.load(model_path, map_location=device, weights_only=False)
-        
-        # Handle different checkpoint formats
-        if isinstance(checkpoint, dict) and 'state_dict' in checkpoint:
-            model.load_state_dict(checkpoint['state_dict'])
-        elif isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
-            model.load_state_dict(checkpoint['model_state_dict'])
-        else:
-            # It might be a direct state dict
-            model.load_state_dict(checkpoint)
-        
-        model.eval()
-        return model, device
+        # Try direct loading with pickle
+        try:
+            st.info("Attempting to load with pickle module...")
+            import pickle
+            with open(model_path, 'rb') as f:
+                checkpoint = pickle.load(f)
+                
+            st.info(f"Checkpoint type: {type(checkpoint)}")
+            if isinstance(checkpoint, dict):
+                st.info(f"Checkpoint keys: {list(checkpoint.keys())}")
+            
+            # Try to apply the state dict
+            if isinstance(checkpoint, dict) and 'state_dict' in checkpoint:
+                model.load_state_dict(checkpoint['state_dict'])
+                st.success("Successfully loaded model using 'state_dict' key")
+            elif isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
+                model.load_state_dict(checkpoint['model_state_dict'])
+                st.success("Successfully loaded model using 'model_state_dict' key")
+            else:
+                # Try direct state dict
+                model.load_state_dict(checkpoint)
+                st.success("Successfully loaded model using direct state dict")
+            
+            model.eval()
+            return model, device
+            
+        except Exception as e1:
+            st.warning(f"Pickle loading failed: {str(e1)}")
+            
+            # Try with torch.load and various options
+            try:
+                st.info("Attempting torch.load with weights_only=False...")
+                checkpoint = torch.load(model_path, map_location=device, weights_only=False)
+                
+                # Try to apply the state dict
+                if isinstance(checkpoint, dict) and 'state_dict' in checkpoint:
+                    model.load_state_dict(checkpoint['state_dict'])
+                    st.success("Successfully loaded model using torch.load with 'state_dict' key")
+                elif isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
+                    model.load_state_dict(checkpoint['model_state_dict'])
+                    st.success("Successfully loaded model using torch.load with 'model_state_dict' key")
+                else:
+                    # Try direct state dict
+                    model.load_state_dict(checkpoint)
+                    st.success("Successfully loaded model using torch.load with direct state dict")
+                
+                model.eval()
+                return model, device
+                
+            except Exception as e2:
+                st.error(f"All loading attempts failed: {str(e2)}")
+                return None, None
+                
     except Exception as e:
-        st.error(f"Error loading model: {str(e)}")
+        st.error(f"Error in model loading process: {str(e)}")
         return None, None
-
-
 # Function to process image with better error handling for non-overlapping geometries
 def process_image(image_path, year, selected_polygon, region_number):
     """
