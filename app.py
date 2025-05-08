@@ -454,6 +454,7 @@ def apply_erosion(image, kernel_size):
 # Load model function
 @st.cache_resource
 @st.cache_resource
+@st.cache_resource
 def load_model(model_path):
     try:
         device = torch.device('cpu')
@@ -465,14 +466,8 @@ def load_model(model_path):
             decoder_attention_type='scse'
         ).to(device)
         
-        # Try with pickle_module=torch.serialization.pickle
-        try:
-            checkpoint = torch.load(model_path, map_location=device)
-        except Exception as e:
-            st.warning(f"Standard loading failed, trying legacy loading: {str(e)}")
-            # Try with older loading method
-            import pickle
-            checkpoint = torch.load(model_path, map_location=device, pickle_module=pickle)
+        # Explicitly set weights_only=False as mentioned in the error message
+        checkpoint = torch.load(model_path, map_location=device, weights_only=False)
         
         # Handle different checkpoint formats
         if isinstance(checkpoint, dict) and 'state_dict' in checkpoint:
