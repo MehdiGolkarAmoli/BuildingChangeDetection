@@ -6,7 +6,7 @@ numpy==1.26.4
 pandas==2.2.3
 scipy==1.15.2
 matplotlib==3.10.1
-
+leafmap
 # Geospatial
 # GDAL==3.6.2
 shapely==2.1.0
