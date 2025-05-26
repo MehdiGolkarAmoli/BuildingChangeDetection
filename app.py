@@ -49,9 +49,11 @@ from tqdm import tqdm
 
 # Function to download model from Google Drive
 @st.cache_data
+# Function to download model from Google Drive with better error handling
+@st.cache_data
 def download_model_from_gdrive(gdrive_url, local_filename):
     """
-    Download a file from Google Drive using the sharing URL
+    Download a file from Google Drive using the sharing URL with improved error handling
     
     Parameters:
     gdrive_url (str): Google Drive sharing URL
@@ -68,76 +70,210 @@ def download_model_from_gdrive(gdrive_url, local_filename):
             st.error("Invalid Google Drive URL format")
             return None
         
-        # Create download URL
-        download_url = f"https://drive.google.com/uc?export=download&id={file_id}"
+        st.info(f"Downloading model from Google Drive (File ID: {file_id})...")
         
-        st.info(f"Downloading model from Google Drive...")
+        # Try multiple download approaches
+        download_urls = [
+            f"https://drive.google.com/uc?export=download&id={file_id}",
+            f"https://drive.google.com/uc?export=download&id={file_id}&confirm=t",
+            f"https://docs.google.com/uc?export=download&id={file_id}",
+        ]
         
-        # Create a session to handle redirects
-        session = requests.Session()
-        
-        # First request to get the download confirmation token (for large files)
-        response = session.get(download_url, stream=True)
-        
-        # Check if we need to handle the download confirmation for large files
-        if 'download_warning' in response.text or 'virus scan warning' in response.text:
-            # Look for the confirmation token
-            for line in response.text.split('\n'):
-                if 'confirm=' in line and 'download' in line:
-                    # Extract the confirmation token
-                    token_start = line.find('confirm=') + 8
-                    token_end = line.find('&', token_start)
-                    if token_end == -1:
-                        token_end = line.find('"', token_start)
-                    token = line[token_start:token_end]
+        for i, download_url in enumerate(download_urls):
+            try:
+                st.info(f"Trying download method {i+1}/3...")
+                
+                # Create a session to handle redirects
+                session = requests.Session()
+                
+                # Set headers to mimic a browser request
+                headers = {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+                }
+                
+                # First request
+                response = session.get(download_url, headers=headers, stream=True)
+                
+                # Handle Google Drive's download warning for large files
+                if response.status_code == 200:
+                    content_type = response.headers.get('content-type', '').lower()
                     
-                    # Make the confirmed download request
-                    confirmed_url = f"https://drive.google.com/uc?export=download&confirm={token}&id={file_id}"
-                    response = session.get(confirmed_url, stream=True)
-                    break
-        
-        # Check if the response is successful
-        if response.status_code == 200:
-            # Get the total file size if available
-            total_size = int(response.headers.get('content-length', 0))
-            
-            # Create progress bar
-            progress_bar = st.progress(0)
-            status_text = st.empty()
-            
-            # Download the file
-            downloaded_size = 0
-            chunk_size = 8192
-            
-            with open(local_filename, 'wb') as f:
-                for chunk in response.iter_content(chunk_size=chunk_size):
-                    if chunk:
-                        f.write(chunk)
-                        downloaded_size += len(chunk)
+                    # Check if we got HTML instead of the file
+                    if 'text/html' in content_type:
+                        # Look for download confirmation
+                        html_content = response.text
                         
-                        # Update progress bar
-                        if total_size > 0:
-                            progress = downloaded_size / total_size
-                            progress_bar.progress(progress)
-                            status_text.text(f"Downloaded: {downloaded_size / (1024*1024):.1f} MB / {total_size / (1024*1024):.1f} MB")
+                        # Try to find the direct download link
+                        import re
+                        
+                        # Pattern 1: Look for confirm parameter
+                        confirm_match = re.search(r'confirm=([a-zA-Z0-9_-]+)', html_content)
+                        if confirm_match:
+                            confirm_token = confirm_match.group(1)
+                            confirmed_url = f"https://drive.google.com/uc?export=download&confirm={confirm_token}&id={file_id}"
+                            response = session.get(confirmed_url, headers=headers, stream=True)
+                        
+                        # Pattern 2: Look for direct download URL in HTML
                         else:
-                            status_text.text(f"Downloaded: {downloaded_size / (1024*1024):.1f} MB")
-            
-            # Clear progress indicators
-            progress_bar.empty()
-            status_text.empty()
-            
-            st.success(f"Model downloaded successfully! Size: {downloaded_size / (1024*1024):.1f} MB")
-            return local_filename
-            
-        else:
-            st.error(f"Failed to download model. HTTP status code: {response.status_code}")
-            return None
+                            download_link_match = re.search(r'href="(/uc\?export=download[^"]*)"', html_content)
+                            if download_link_match:
+                                download_path = download_link_match.group(1)
+                                confirmed_url = f"https://drive.google.com{download_path}"
+                                response = session.get(confirmed_url, headers=headers, stream=True)
+                    
+                    # Check if we now have the actual file
+                    if response.status_code == 200:
+                        content_type = response.headers.get('content-type', '').lower()
+                        
+                        # Verify we're not getting HTML
+                        if 'text/html' not in content_type:
+                            # Get the total file size if available
+                            total_size = int(response.headers.get('content-length', 0))
+                            
+                            # Create progress bar
+                            progress_bar = st.progress(0)
+                            status_text = st.empty()
+                            
+                            # Download the file
+                            downloaded_size = 0
+                            chunk_size = 8192
+                            
+                            with open(local_filename, 'wb') as f:
+                                for chunk in response.iter_content(chunk_size=chunk_size):
+                                    if chunk:
+                                        f.write(chunk)
+                                        downloaded_size += len(chunk)
+                                        
+                                        # Update progress bar
+                                        if total_size > 0:
+                                            progress = downloaded_size / total_size
+                                            progress_bar.progress(progress)
+                                            status_text.text(f"Downloaded: {downloaded_size / (1024*1024):.1f} MB / {total_size / (1024*1024):.1f} MB")
+                                        else:
+                                            status_text.text(f"Downloaded: {downloaded_size / (1024*1024):.1f} MB")
+                            
+                            # Clear progress indicators
+                            progress_bar.empty()
+                            status_text.empty()
+                            
+                            # Verify the downloaded file
+                            if os.path.exists(local_filename) and os.path.getsize(local_filename) > 1024:  # At least 1KB
+                                # Try to verify it's a valid PyTorch file
+                                try:
+                                    # Just try to load the first few bytes to check if it's a valid pickle file
+                                    with open(local_filename, 'rb') as f:
+                                        header = f.read(10)
+                                        if header.startswith(b'\x80\x03') or header.startswith(b'PK'):  # Pickle or ZIP format
+                                            st.success(f"Model downloaded successfully! Size: {downloaded_size / (1024*1024):.1f} MB")
+                                            return local_filename
+                                        else:
+                                            st.warning(f"Downloaded file doesn't appear to be a valid model file. Header: {header}")
+                                            os.remove(local_filename)
+                                except Exception as e:
+                                    st.warning(f"Could not verify downloaded file: {e}")
+                                    if os.path.exists(local_filename):
+                                        os.remove(local_filename)
+                            else:
+                                st.warning("Downloaded file is too small or doesn't exist")
+                                if os.path.exists(local_filename):
+                                    os.remove(local_filename)
+                        else:
+                            st.warning(f"Received HTML content instead of file (method {i+1})")
+                    else:
+                        st.warning(f"HTTP error {response.status_code} (method {i+1})")
+                        
+            except Exception as e:
+                st.warning(f"Download method {i+1} failed: {str(e)}")
+                continue
+        
+        # If all methods failed, provide alternative instructions
+        st.error("All download methods failed. Please try one of these alternatives:")
+        st.info("""
+        **Alternative 1: Manual Download**
+        1. Open this link in your browser: https://drive.google.com/file/d/1m6EScw-mpBIvWV78h4pyjWq1OLQtn2ov/view
+        2. Click "Download" button
+        3. Save the file as 'best_model_version_Unet++_v03_e7.pt' in your working directory
+        
+        **Alternative 2: Use gdown library**
+        Run this command in your terminal:
+        ```bash
+        pip install gdown
+        gdown https://drive.google.com/uc?id=1m6EScw-mpBIvWV78h4pyjWq1OLQtn2ov
+        ```
+        
+        **Alternative 3: Check file sharing permissions**
+        Make sure the Google Drive file is set to "Anyone with the link can view"
+        """)
+        
+        return None
             
     except Exception as e:
         st.error(f"Error downloading model from Google Drive: {str(e)}")
         return None
 
+# Alternative function using gdown library
+def download_with_gdown(file_id, output_path):
+    """
+    Alternative download method using gdown library
+    """
+    try:
+        import gdown
+        url = f"https://drive.google.com/uc?id={file_id}"
+        gdown.download(url, output_path, quiet=False)
+        return output_path
+    except ImportError:
+        st.info("Installing gdown library...")
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "gdown"])
+        import gdown
+        url = f"https://drive.google.com/uc?id={file_id}"
+        gdown.download(url, output_path, quiet=False)
+        return output_path
+    except Exception as e:
+        st.error(f"gdown download failed: {e}")
+        return None
+
+# Updated model loading section
+# Google Drive model URL and local path
+gdrive_model_url = "https://drive.google.com/file/d/1m6EScw-mpBIvWV78h4pyjWq1OLQtn2ov/view?usp=drive_link"
+model_path = "best_model_version_Unet++_v03_e7.pt"
+
+# Download model if it doesn't exist locally
+if not os.path.exists(model_path):
+    st.info("Model not found locally. Attempting to download from Google Drive...")
+    
+    # Try the improved download function first
+    downloaded_model_path = download_model_from_gdrive(gdrive_model_url, model_path)
+    
+    # If that fails, try gdown as backup
+    if downloaded_model_path is None:
+        st.info("Trying alternative download method with gdown...")
+        file_id = "1m6EScw-mpBIvWV78h4pyjWq1OLQtn2ov"
+        try:
+            downloaded_model_path = download_with_gdown(file_id, model_path)
+        except Exception as e:
+            st.error(f"gdown download also failed: {e}")
+            downloaded_model_path = None
+    
+    if downloaded_model_path is None:
+        st.error("Failed to download model. Please download it manually and place it in the working directory.")
+        st.stop()
+else:
+    st.success("Model found locally!")
+
+# Verify the model file before proceeding
+if os.path.exists(model_path):
+    try:
+        # Try to load just the header to verify it's a valid PyTorch file
+        with open(model_path, 'rb') as f:
+            header = f.read(10)
+            if not (header.startswith(b'\x80\x03') or header.startswith(b'PK')):
+                st.error("The model file appears to be corrupted or invalid. Please re-download it.")
+                st.info("File header: " + str(header))
+                os.remove(model_path)  # Remove the invalid file
+                st.stop()
+    except Exception as e:
+        st.error(f"Error verifying model file: {e}")
+        st.stop()
 # Install GEES2Downloader if not already installed
 try:
     from geeS2downloader.geeS2downloader import GEES2Downloader
