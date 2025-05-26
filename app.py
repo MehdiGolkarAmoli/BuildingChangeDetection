@@ -263,6 +263,25 @@ def extract_and_convert_zip_to_pt(zip_path):
         return None
 
 # MODIFIED FUNCTION: Load model with zip support
+def detect_file_type(file_path):
+    """
+    Detect the actual file type by reading the file header
+    """
+    try:
+        with open(file_path, 'rb') as f:
+            header = f.read(16)
+        
+        # Check for ZIP file signature
+        if header.startswith(b'PK\x03\x04') or header.startswith(b'PK\x05\x06') or header.startswith(b'PK\x07\x08'):
+            return 'zip'
+        # Check for PyTorch file (usually starts with specific bytes)
+        elif header.startswith(b'\x80\x02'):  # Common PyTorch pickle header
+            return 'pytorch'
+        else:
+            return 'unknown'
+    except Exception as e:
+        st.error(f"Error reading file header: {e}")
+        return 'error'
 @st.cache_resource
 def load_model(model_path):
     try:
