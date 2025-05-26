@@ -44,7 +44,7 @@ st.set_page_config(layout="wide", page_title="Satellite Image Analysis Tool")
 import folium
 from streamlit_folium import folium_static, st_folium
 import geemap
-import segmentation_models_pytorch as smp
+import segmentation_models_pytorch as 
 from tqdm import tqdm
 
 # Function to download model from Google Drive
@@ -248,6 +248,7 @@ if 'change_detection_result' not in st.session_state:
 
 # Google Drive model URL and local path
 gdrive_model_url = "https://drive.google.com/file/d/1m6EScw-mpBIvWV78h4pyjWq1OLQtn2ov/view?usp=drive_link"
+gdrive_model_url = "https://drive.google.com/file/d/1m6EScw-mpBIvWV78h4pyjWq1OLQtn2ov/view?usp=sharing"
 model_path = "best_model_version_Unet++_v03_e7.pt"
 
 # Download model if it doesn't exist locally
