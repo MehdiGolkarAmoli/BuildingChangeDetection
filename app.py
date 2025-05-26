@@ -361,7 +361,7 @@ else:
     st.stop()
 
 # Create tabs for different pages
-tab1, tab2, tab3, tab4 = st.tabs(["Region Selection", "Before Image Analysis", "After Image Analysis", "Change Detection"])
+tab1, tab2, tab3,  = st.tabs(["Region Selection", "Before Image Analysis", "After Image Analysis", "Change Detection"])
 
 # Global variables
 if 'drawn_polygons' not in st.session_state:
