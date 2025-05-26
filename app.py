@@ -44,7 +44,7 @@ st.set_page_config(layout="wide", page_title="Satellite Image Analysis Tool")
 import folium
 from streamlit_folium import folium_static, st_folium
 import geemap
-import segmentation_models_pytorch as 
+import segmentation_models_pytorch as smp
 from tqdm import tqdm
 
 # Function to download model from Google Drive
