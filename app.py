@@ -216,7 +216,7 @@ def manual_download_fallback(file_id, local_filename):
 
 # Updated model loading section with correct file ID
 # Google Drive model URL and local path
-gdrive_model_url = "https://drive.google.com/file/d/1Fgn4j61XQQEoc_TnaUE5ClWDnzoopDgJ/view?usp=sharing"
+gdrive_model_url = "https://drive.google.com/file/d/1m6EScw-mpBIvWV78h4pyjWq1OLQtn2ov/view?usp=drive_link"
 model_path = "best_model_version_Unet++_v02_e8.pt"
 
 # Alternative: You can also directly specify the file ID
@@ -391,7 +391,6 @@ if 'change_detection_result' not in st.session_state:
     st.session_state.change_detection_result = None
 
 # Google Drive model URL and local path
-gdrive_model_url = "https://drive.google.com/file/d/1m6EScw-mpBIvWV78h4pyjWq1OLQtn2ov/view?usp=drive_link"
 gdrive_model_url = "https://drive.google.com/file/d/1Fgn4j61XQQEoc_TnaUE5ClWDnzoopDgJ/view?usp=drive_link"
 model_path = "best_model_version_Unet++_v03_e7.pt"
 
