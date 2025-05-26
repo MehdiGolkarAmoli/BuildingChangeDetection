@@ -47,6 +47,97 @@ import geemap
 import segmentation_models_pytorch as smp
 from tqdm import tqdm
 
+# Function to download model from Google Drive
+@st.cache_data
+def download_model_from_gdrive(gdrive_url, local_filename):
+    """
+    Download a file from Google Drive using the sharing URL
+    
+    Parameters:
+    gdrive_url (str): Google Drive sharing URL
+    local_filename (str): Local filename to save the downloaded file
+    
+    Returns:
+    str: Path to the downloaded file or None if download failed
+    """
+    try:
+        # Extract file ID from Google Drive URL
+        if '/file/d/' in gdrive_url:
+            file_id = gdrive_url.split('/file/d/')[1].split('/')[0]
+        else:
+            st.error("Invalid Google Drive URL format")
+            return None
+        
+        # Create download URL
+        download_url = f"https://drive.google.com/uc?export=download&id={file_id}"
+        
+        st.info(f"Downloading model from Google Drive...")
+        
+        # Create a session to handle redirects
+        session = requests.Session()
+        
+        # First request to get the download confirmation token (for large files)
+        response = session.get(download_url, stream=True)
+        
+        # Check if we need to handle the download confirmation for large files
+        if 'download_warning' in response.text or 'virus scan warning' in response.text:
+            # Look for the confirmation token
+            for line in response.text.split('\n'):
+                if 'confirm=' in line and 'download' in line:
+                    # Extract the confirmation token
+                    token_start = line.find('confirm=') + 8
+                    token_end = line.find('&', token_start)
+                    if token_end == -1:
+                        token_end = line.find('"', token_start)
+                    token = line[token_start:token_end]
+                    
+                    # Make the confirmed download request
+                    confirmed_url = f"https://drive.google.com/uc?export=download&confirm={token}&id={file_id}"
+                    response = session.get(confirmed_url, stream=True)
+                    break
+        
+        # Check if the response is successful
+        if response.status_code == 200:
+            # Get the total file size if available
+            total_size = int(response.headers.get('content-length', 0))
+            
+            # Create progress bar
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            
+            # Download the file
+            downloaded_size = 0
+            chunk_size = 8192
+            
+            with open(local_filename, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=chunk_size):
+                    if chunk:
+                        f.write(chunk)
+                        downloaded_size += len(chunk)
+                        
+                        # Update progress bar
+                        if total_size > 0:
+                            progress = downloaded_size / total_size
+                            progress_bar.progress(progress)
+                            status_text.text(f"Downloaded: {downloaded_size / (1024*1024):.1f} MB / {total_size / (1024*1024):.1f} MB")
+                        else:
+                            status_text.text(f"Downloaded: {downloaded_size / (1024*1024):.1f} MB")
+            
+            # Clear progress indicators
+            progress_bar.empty()
+            status_text.empty()
+            
+            st.success(f"Model downloaded successfully! Size: {downloaded_size / (1024*1024):.1f} MB")
+            return local_filename
+            
+        else:
+            st.error(f"Failed to download model. HTTP status code: {response.status_code}")
+            return None
+            
+    except Exception as e:
+        st.error(f"Error downloading model from Google Drive: {str(e)}")
+        return None
+
 # Install GEES2Downloader if not already installed
 try:
     from geeS2downloader.geeS2downloader import GEES2Downloader
@@ -126,6 +217,7 @@ else:
     4. Set this as an environment variable in your Posit Cloud environment
     """)
     st.stop()
+
 # Create tabs for different pages
 tab1, tab2, tab3, tab4 = st.tabs(["Region Selection", "Before Image Analysis", "After Image Analysis", "Change Detection"])
 
@@ -154,8 +246,19 @@ if 'saved_patches_paths_2024' not in st.session_state:
 if 'change_detection_result' not in st.session_state:
     st.session_state.change_detection_result = None
 
-# Path to model
-model_path = r"best_model_version_Unet++_v03_e7.pt"
+# Google Drive model URL and local path
+gdrive_model_url = "https://drive.google.com/file/d/1m6EScw-mpBIvWV78h4pyjWq1OLQtn2ov/view?usp=drive_link"
+model_path = "best_model_version_Unet++_v03_e7.pt"
+
+# Download model if it doesn't exist locally
+if not os.path.exists(model_path):
+    st.info("Model not found locally. Downloading from Google Drive...")
+    downloaded_model_path = download_model_from_gdrive(gdrive_model_url, model_path)
+    if downloaded_model_path is None:
+        st.error("Failed to download model. Please check your internet connection and try again.")
+        st.stop()
+else:
+    st.success("Model found locally!")
 
 # Define Sentinel-2 bands to use
 S2_BANDS = ['B1', 'B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B8', 'B8A', 'B9', 'B11', 'B12']
@@ -451,7 +554,6 @@ def apply_erosion(image, kernel_size):
     
     return eroded_image
 
-
 @st.cache_resource
 def load_model(model_path):
     try:
@@ -492,8 +594,8 @@ def load_model(model_path):
         st.error(f"Error loading model: {str(e)}")
         st.session_state.model_loaded = False # Indicate model loading failed
         return None, None
-        
-    
+
+# [Rest of your code continues unchanged from here...]
 # Function to process image with better error handling for non-overlapping geometries
 def process_image(image_path, year, selected_polygon, region_number):
     """
@@ -1254,7 +1356,6 @@ with tab1:
         if int(before_year) > int(after_year):
             st.warning("⚠️ The 'Before' year is later than the 'After' year. This may lead to unexpected results.")
 
-# Second tab - Sentinel-2 "Before" Image Analysis
 with tab2:
     st.header("Before Image Analysis")
     
@@ -1415,1236 +1516,6 @@ with tab3:
         st.info("No regions have been selected yet. Please go to the Region Selection tab and draw a polygon.")
 
 # Fourth tab - Change Detection
-
-    st.header("Building Change Detection")
-    
-    # Get the years for display
-    before_year = st.session_state.before_year if 'before_year' in st.session_state else "2021"
-    after_year = st.session_state.after_year if 'after_year' in st.session_state else "2024"
-    
-    # Check if both reconstructed images are available
-    has_before_image = 'reconstructed_before_image' in st.session_state and st.session_state.reconstructed_before_image is not None
-    has_after_image = 'reconstructed_after_image' in st.session_state and st.session_state.reconstructed_after_image is not None
-    
-    if has_before_image and has_after_image:
-        st.success(f"Both {before_year} and {after_year} classification images are available for change detection")
-        
-        # Get the reconstructed images
-        img_before = st.session_state.reconstructed_before_image
-        img_after = st.session_state.reconstructed_after_image
-        
-        # Check if the images have the same dimensions
-        if img_before.shape != img_after.shape:
-            st.error("The two classification images have different dimensions. They need to be the same size for change detection.")
-            st.info(f"{before_year} image: {img_before.shape}, {after_year} image: {img_after.shape}")
-            
-            # Offer a solution if the dimensions don't match
-            st.warning("To perform change detection, both images need to be processed using the same region.")
-            st.info("Please go back to the Region Selection tab and ensure you use the same region for both time periods.")
-        else:
-            st.info("Processing change detection...")
-            
-            # Create binary versions of the images (0 or 1)
-            binary_before = (img_before > 0).astype(np.uint8)
-            binary_after = (img_after > 0).astype(np.uint8)
-            
-            # Detect new buildings (pixels where after=1 and before=0)
-            new_buildings = np.logical_and(binary_after == 1, binary_before == 0).astype(np.uint8) * 255
-            
-            # Store the change detection result
-            st.session_state.change_detection_result = new_buildings
-            
-            # Display the change detection results
-            fig, axes = plt.subplots(1, 3, figsize=(18, 6))
-            
-            # Before Classification
-            axes[0].imshow(binary_before, cmap='gray')
-            axes[0].set_title(f"{before_year} Building Classification")
-            axes[0].axis('off')
-            
-            # After Classification
-            axes[1].imshow(binary_after, cmap='gray')
-            axes[1].set_title(f"{after_year} Building Classification")
-            axes[1].axis('off')
-            
-            # New Buildings (Change Detection)
-            axes[2].imshow(new_buildings, cmap='hot')
-            axes[2].set_title(f"New Buildings ({before_year}-{after_year})")
-            axes[2].axis('off')
-            
-            plt.tight_layout()
-            st.pyplot(fig)
-            
-            # Morphological Erosion Section
-            st.subheader("Apply Morphological Erosion")
-            st.write("Erosion can help remove small noise and refine the change detection results.")
-            
-            # Dropdown for kernel size selection
-            kernel_size = st.selectbox("Select Erosion Kernel Size:", [2, 3, 4, 5, 7, 9], index=1)
-            
-            if st.button("Apply Erosion"):
-                # Apply erosion to the change detection result
-                eroded_result = apply_erosion(new_buildings, kernel_size)
-                
-                # Store the eroded result
-                st.session_state.eroded_result = eroded_result
-                
-                # Display the original and eroded results
-                fig, axes = plt.subplots(1, 2, figsize=(15, 7))
-                
-                # Original Change Detection
-                axes[0].imshow(new_buildings, cmap='hot')
-                axes[0].set_title("Original Change Detection")
-                axes[0].axis('off')
-                
-                # Eroded Result
-                axes[1].imshow(eroded_result, cmap='hot')
-                axes[1].set_title(f"After Erosion (Kernel Size: {kernel_size})")
-                axes[1].axis('off')
-                
-                plt.tight_layout()
-                st.pyplot(fig)
-                
-                # Save the eroded result
-                temp_dir = tempfile.mkdtemp()
-                output_filename = f"change_detection_{before_year}_{after_year}_eroded_k{kernel_size}.tif"
-                output_path = os.path.join(temp_dir, output_filename)
-                
-                # Get metadata from one of the reconstructed images
-                out_meta = st.session_state.clipped_meta.copy()
-                out_meta.update({
-                    'count': 1,
-                    'height': eroded_result.shape[0],
-                    'width': eroded_result.shape[1],
-                    'dtype': 'uint8'
-                })
-                
-                # Save as GeoTIFF
-                with rasterio.open(output_path, 'w', **out_meta) as dst:
-                    dst.write(eroded_result.astype(np.uint8), 1)
-                
-                st.success(f"Successfully saved eroded change detection result")
-                
-           
-                # Provide download link
-                with open(output_path, "rb") as file:
-                    st.download_button(
-                        label=f"Download Eroded Change Detection",
-                        data=file,
-                        file_name=output_filename,
-                        mime="image/tiff"
-                    )
-                
-                # Calculate statistics
-                total_pixels = eroded_result.size
-                building_pixels = np.sum(eroded_result > 0)
-                building_percentage = (building_pixels / total_pixels) * 100
-                
-                # Display statistics
-                st.subheader("Change Detection Statistics")
-                st.write(f"Total area analyzed: {total_pixels} pixels")
-                st.write(f"New building area: {building_pixels} pixels ({building_percentage:.2f}%)")
-                
-                # Create a simple bar chart
-                fig, ax = plt.subplots(figsize=(8, 5))
-                ax.bar(["Non-building", "New Buildings"], 
-                       [total_pixels - building_pixels, building_pixels])
-                ax.set_ylabel("Pixel Count")
-                ax.set_title("Change Detection Results")
-                
-                # Add percentage labels
-                ax.text(0, (total_pixels - building_pixels)/2, f"{100-building_percentage:.2f}%", 
-                       ha='center', va='center')
-                ax.text(1, building_pixels/2, f"{building_percentage:.2f}%", 
-                       ha='center', va='center')
-                
-                st.pyplot(fig)
-    else:
-        if not has_before_image and not has_after_image:
-            st.warning("Both 2021 and 2024 images need to be processed first.")
-            st.info("Please go to the Sentinel-2 2021 Analysis and Sentinel-2 2024 Analysis tabs to process the images.")
-        elif not has_before_image:
-            st.warning("2021 image needs to be processed first.")
-            st.info("Please go to the Sentinel-2 2021 Analysis tab to process the image.")
-        else:
-            st.warning("2024 image needs to be processed first.")
-            st.info("Please go to the Sentinel-2 2024 Analysis tab to process the image.")
-with tab4:
-    st.header("Building Change Detection")
-
-    # Import required libraries
-    import tempfile
-    import os
-    import time
-    import rasterio
-    from rasterio.warp import calculate_default_transform, reproject, Resampling
-    from shapely.geometry import mapping
-    import io
-    from PIL import Image
-    import leafmap.foliumap as leafmap
-    import json
-    import geopandas as gpd
-
-    # 1) Retrieve the processed classification arrays
-    before_year = st.session_state.get("before_year", "2021")
-    after_year = st.session_state.get("after_year", "2024")
-
-    # Ensure both exist
-    if (
-        "reconstructed_before_image" not in st.session_state or
-        "reconstructed_after_image" not in st.session_state
-    ):
-        st.warning("Please process both the Before and After images first (tabs 2 & 3).")
-        st.stop()
-
-    img_before = st.session_state.reconstructed_before_image
-    img_after = st.session_state.reconstructed_after_image
-
-    # 2) Dimension check
-    if img_before.shape != img_after.shape:
-        st.error("The Before/After images have different shapes.")
-        st.info(f"{before_year}: {img_before.shape}, {after_year}: {img_after.shape}")
-        st.stop()
-
-    # 3) Compute raw change mask (new buildings)
-    binary_before = (img_before > 0).astype(np.uint8)
-    binary_after = (img_after > 0).astype(np.uint8)
-    raw_mask = ((binary_after == 1) & (binary_before == 0)).astype(np.uint8) * 255
-    st.session_state.change_detection_result = raw_mask
-
-    # 4) Display raw results side by side
-    st.subheader("Raw Change Detection")
-    fig, axs = plt.subplots(1, 3, figsize=(18, 5))
-    axs[0].imshow(binary_before, cmap="gray")  # Keep as black and white
-    axs[0].set_title(f"{before_year} Classification")
-    axs[0].axis("off")
-    axs[1].imshow(binary_after, cmap="gray")  # Keep as black and white
-    axs[1].set_title(f"{after_year} Classification")
-    axs[1].axis("off")
-    axs[2].imshow(raw_mask, cmap="hot")
-    axs[2].set_title("New Buildings")
-    axs[2].axis("off")
-    st.pyplot(fig)
-
-    # 5) Erosion UI
-    st.subheader("Refine with Morphological Erosion")
-    
-    # Use a unique key for the kernel size selectbox
-    kernel = st.selectbox(
-        "Kernel size",
-        [2, 3, 4, 5, 7, 9],
-        index=0,
-        key="tab4_erosion_kernel_size"
-    )
-    
-    if st.button("Apply Erosion", key="tab4_apply_erosion_btn"):
-        eroded = apply_erosion(raw_mask, kernel)
-        st.session_state.eroded_result = eroded
-
-        # Show before & after erosion
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
-        ax1.imshow(raw_mask, cmap="hot")
-        ax1.set_title("Original Mask")
-        ax1.axis("off")
-        ax2.imshow(eroded, cmap="hot")
-        ax2.set_title(f"Eroded (k={kernel})")
-        ax2.axis("off")
-        st.pyplot(fig)
-
-    # 6) Interactive Map only once we have eroded_result
-    if "eroded_result" in st.session_state:
-        st.subheader("Interactive Map")
-        
-        # Note about layer visibility
-        st.info("Use the layer control in the top-right to toggle layers on/off and adjust opacity.")
-        
-        try:
-            # Get the polygon used for processing
-            if 'region_number' in st.session_state and st.session_state.region_number <= len(st.session_state.drawn_polygons):
-                selected_polygon = st.session_state.drawn_polygons[st.session_state.region_number - 1]
-                centroid = selected_polygon.centroid
-                center = [centroid.y, centroid.x]  # [lat, lon]
-            else:
-                center = [35.6892, 51.3890]  # Default center (Tehran)
-            
-            # Function to create RGB images from multispectral data
-            def create_rgb_image(img_array, bands=(3, 2, 1), percentile=(2, 98)):
-                """Create RGB composite from multispectral image array"""
-                h, w = img_array.shape[1], img_array.shape[2]
-                rgb = np.zeros((h, w, 3), dtype=np.float32)
-                
-                for i, band in enumerate(bands):
-                    if band < img_array.shape[0]:
-                        band_data = img_array[band]
-                        # Simple contrast stretch
-                        min_val = np.percentile(band_data, percentile[0])
-                        max_val = np.percentile(band_data, percentile[1])
-                        rgb[:, :, i] = np.clip((band_data - min_val) / (max_val - min_val), 0, 1)
-                
-                return rgb
-            
-            # Create and save the images as temporary files
-            temp_dir = tempfile.gettempdir()
-            
-            # Check if we have the clipped Sentinel-2 data in memory
-            has_sentinel_data = (
-                'clipped_img' in st.session_state and 
-                'clipped_img_2024' in st.session_state and
-                'clipped_meta' in st.session_state
-            )
-            
-            # Get bounds and CRS information
-            if 'clipped_meta' in st.session_state:
-                # Get the UTM transform and CRS from the sentinel data
-                utm_transform = st.session_state.clipped_meta['transform']
-                utm_crs = st.session_state.clipped_meta['crs']
-                utm_height = st.session_state.clipped_img.shape[1]
-                utm_width = st.session_state.clipped_img.shape[2]
-                bounds = selected_polygon.bounds  # Use polygon bounds
-            else:
-                # Fallback to polygon bounds
-                bounds = selected_polygon.bounds
-                utm_crs = None
-                utm_transform = None
-                utm_height = binary_before.shape[0]
-                utm_width = binary_before.shape[1]
-            
-            # Variables to store paths for download buttons
-            before_class_wgs84_path = None
-            after_class_wgs84_path = None
-            change_mask_wgs84_path = None
-            before_rgb_wgs84_path = None
-            after_rgb_wgs84_path = None
-            
-            # Store target resolution for consistent reprojection
-            target_resolution_x = None
-            target_resolution_y = None
-            target_width = None
-            target_height = None
-            target_transform = None
-            
-            # Process and save Sentinel-2 images first to determine target resolution
-            if has_sentinel_data:
-                # Save Sentinel-2 images (first 4 bands) as GeoTIFF files
-                before_sentinel_utm_path = os.path.join(temp_dir, f"before_sentinel_utm_{before_year}_{time.time()}.tif")
-                
-                # Get the first 4 bands (B, G, R, NIR)
-                before_bands = st.session_state.clipped_img[:4, :, :]
-                
-                with rasterio.open(
-                    before_sentinel_utm_path, 'w',
-                    driver='GTiff',
-                    height=before_bands.shape[1],
-                    width=before_bands.shape[2],
-                    count=4,  # 4 bands
-                    dtype=before_bands.dtype,
-                    crs=utm_crs,
-                    transform=utm_transform
-                ) as dst:
-                    for i in range(4):
-                        dst.write(before_bands[i], i+1)
-                
-                # Reproject Sentinel-2 before image to WGS84
-                before_sentinel_wgs84_path = os.path.join(temp_dir, f"before_sentinel_wgs84_{before_year}_{time.time()}.tif")
-                with rasterio.open(before_sentinel_utm_path) as src:
-                    # Calculate the ideal dimensions and transformation parameters
-                    dst_transform, dst_width, dst_height = calculate_default_transform(
-                        src.crs, 'EPSG:4326', src.width, src.height, *src.bounds)
-                    
-                    # Store these values for consistent reprojection of all layers
-                    target_transform = dst_transform
-                    target_width = dst_width
-                    target_height = dst_height
-                    
-                    # Calculate resolution
-                    target_resolution_x = (src.bounds.right - src.bounds.left) / dst_width
-                    target_resolution_y = (src.bounds.top - src.bounds.bottom) / dst_height
-                    
-                    # Create the WGS84 version
-                    dst_kwargs = src.meta.copy()
-                    dst_kwargs.update({
-                        'crs': 'EPSG:4326',
-                        'transform': dst_transform,
-                        'width': dst_width,
-                        'height': dst_height
-                    })
-                    
-                    with rasterio.open(before_sentinel_wgs84_path, 'w', **dst_kwargs) as dst:
-                        for i in range(1, 5):  # 4 bands
-                            reproject(
-                                source=rasterio.band(src, i),
-                                destination=rasterio.band(dst, i),
-                                src_transform=src.transform,
-                                src_crs=src.crs,
-                                dst_transform=dst_transform,
-                                dst_crs='EPSG:4326',
-                                resampling=Resampling.nearest
-                            )
-                
-                # Save Sentinel-2 after image (first 4 bands) as GeoTIFF
-                after_sentinel_utm_path = os.path.join(temp_dir, f"after_sentinel_utm_{after_year}_{time.time()}.tif")
-                
-                # Get the first 4 bands (B, G, R, NIR)
-                after_bands = st.session_state.clipped_img_2024[:4, :, :]
-                
-                with rasterio.open(
-                    after_sentinel_utm_path, 'w',
-                    driver='GTiff',
-                    height=after_bands.shape[1],
-                    width=after_bands.shape[2],
-                    count=4,  # 4 bands
-                    dtype=after_bands.dtype,
-                    crs=utm_crs,
-                    transform=utm_transform
-                ) as dst:
-                    for i in range(4):
-                        dst.write(after_bands[i], i+1)
-                
-                # Reproject Sentinel-2 after image to WGS84
-                after_sentinel_wgs84_path = os.path.join(temp_dir, f"after_sentinel_wgs84_{after_year}_{time.time()}.tif")
-                with rasterio.open(after_sentinel_utm_path) as src:
-                    # Use the same dimensions and transform as the before image for consistency
-                    dst_kwargs = src.meta.copy()
-                    dst_kwargs.update({
-                        'crs': 'EPSG:4326',
-                        'transform': target_transform,
-                        'width': target_width,
-                        'height': target_height
-                    })
-                    
-                    with rasterio.open(after_sentinel_wgs84_path, 'w', **dst_kwargs) as dst:
-                        for i in range(1, 5):  # 4 bands
-                            reproject(
-                                source=rasterio.band(src, i),
-                                destination=rasterio.band(dst, i),
-                                src_transform=src.transform,
-                                src_crs=src.crs,
-                                dst_transform=target_transform,
-                                dst_crs='EPSG:4326',
-                                resampling=Resampling.nearest
-                            )
-                
-                # Create RGB GeoTIFFs for leafmap display
-                before_rgb_wgs84_path = os.path.join(temp_dir, f"before_rgb_wgs84_{before_year}_{time.time()}.tif")
-                with rasterio.open(before_sentinel_wgs84_path) as src:
-                    profile = src.profile.copy()
-                    profile.update(count=3)  # RGB has 3 bands
-                    with rasterio.open(before_rgb_wgs84_path, 'w', **profile) as dst:
-                        # Use bands 3,2,1 (R,G,B) from the 4-band image
-                        rgb_data = np.zeros((3, src.height, src.width), dtype=np.uint8)
-                        for i, band_idx in enumerate([3, 2, 1]):  # R,G,B bands
-                            band_data = src.read(band_idx)
-                            # Simple contrast stretch
-                            min_val = np.percentile(band_data, 2)
-                            max_val = np.percentile(band_data, 98)
-                            rgb_data[i] = np.clip((band_data - min_val) / (max_val - min_val) * 255, 0, 255).astype(np.uint8)
-                        dst.write(rgb_data)
-                
-                after_rgb_wgs84_path = os.path.join(temp_dir, f"after_rgb_wgs84_{after_year}_{time.time()}.tif")
-                with rasterio.open(after_sentinel_wgs84_path) as src:
-                    profile = src.profile.copy()
-                    profile.update(count=3)  # RGB has 3 bands
-                    with rasterio.open(after_rgb_wgs84_path, 'w', **profile) as dst:
-                        # Use bands 3,2,1 (R,G,B) from the 4-band image
-                        rgb_data = np.zeros((3, src.height, src.width), dtype=np.uint8)
-                        for i, band_idx in enumerate([3, 2, 1]):  # R,G,B bands
-                            band_data = src.read(band_idx)
-                            # Simple contrast stretch
-                            min_val = np.percentile(band_data, 2)
-                            max_val = np.percentile(band_data, 98)
-                            rgb_data[i] = np.clip((band_data - min_val) / (max_val - min_val) * 255, 0, 255).astype(np.uint8)
-                        dst.write(rgb_data)
-            
-            # Create properly georeferenced GeoTIFFs for classification results
-            if utm_crs is not None and utm_transform is not None:
-                # Define WGS84 as target CRS
-                dst_crs = 'EPSG:4326'  # WGS84
-                
-                # Save before classification as georeferenced GeoTIFF in UTM
-                before_class_utm_path = os.path.join(temp_dir, f"before_class_utm_{before_year}_{time.time()}.tif")
-                with rasterio.open(
-                    before_class_utm_path, 'w',
-                    driver='GTiff',
-                    height=binary_before.shape[0],
-                    width=binary_before.shape[1],
-                    count=1,
-                    dtype=binary_before.dtype,
-                    crs=utm_crs,
-                    transform=utm_transform
-                ) as dst:
-                    dst.write(binary_before, 1)
-                
-                # Reproject to WGS84
-                before_class_wgs84_path = os.path.join(temp_dir, f"before_class_wgs84_{before_year}_{time.time()}.tif")
-                with rasterio.open(before_class_utm_path) as src:
-                    # Use the same target dimensions and transform as the Sentinel-2 images if available
-                    if target_transform is not None:
-                        dst_transform = target_transform
-                        dst_width = target_width
-                        dst_height = target_height
-                    else:
-                        # Calculate the ideal dimensions and transformation parameters
-                        dst_transform, dst_width, dst_height = calculate_default_transform(
-                            src.crs, dst_crs, src.width, src.height, *src.bounds)
-                    
-                    # Create the WGS84 version
-                    dst_kwargs = src.meta.copy()
-                    dst_kwargs.update({
-                        'crs': dst_crs,
-                        'transform': dst_transform,
-                        'width': dst_width,
-                        'height': dst_height
-                    })
-                    
-                    with rasterio.open(before_class_wgs84_path, 'w', **dst_kwargs) as dst:
-                        reproject(
-                            source=rasterio.band(src, 1),
-                            destination=rasterio.band(dst, 1),
-                            src_transform=src.transform,
-                            src_crs=src.crs,
-                            dst_transform=dst_transform,
-                            dst_crs=dst_crs,
-                            resampling=Resampling.nearest
-                        )
-                
-                # Save after classification as georeferenced GeoTIFF in UTM
-                after_class_utm_path = os.path.join(temp_dir, f"after_class_utm_{after_year}_{time.time()}.tif")
-                with rasterio.open(
-                    after_class_utm_path, 'w',
-                    driver='GTiff',
-                    height=binary_after.shape[0],
-                    width=binary_after.shape[1],
-                    count=1,
-                    dtype=binary_after.dtype,
-                    crs=utm_crs,
-                    transform=utm_transform
-                ) as dst:
-                    dst.write(binary_after, 1)
-                
-                # Reproject to WGS84
-                after_class_wgs84_path = os.path.join(temp_dir, f"after_class_wgs84_{after_year}_{time.time()}.tif")
-                with rasterio.open(after_class_utm_path) as src:
-                    # Use the same target dimensions and transform as the Sentinel-2 images if available
-                    if target_transform is not None:
-                        dst_transform = target_transform
-                        dst_width = target_width
-                        dst_height = target_height
-                    else:
-                        # Calculate the ideal dimensions and transformation parameters
-                        dst_transform, dst_width, dst_height = calculate_default_transform(
-                            src.crs, dst_crs, src.width, src.height, *src.bounds)
-                    
-                    # Create the WGS84 version
-                    dst_kwargs = src.meta.copy()
-                    dst_kwargs.update({
-                        'crs': dst_crs,
-                        'transform': dst_transform,
-                        'width': dst_width,
-                        'height': dst_height
-                    })
-                    
-                    with rasterio.open(after_class_wgs84_path, 'w', **dst_kwargs) as dst:
-                        reproject(
-                            source=rasterio.band(src, 1),
-                            destination=rasterio.band(dst, 1),
-                            src_transform=src.transform,
-                            src_crs=src.crs,
-                            dst_transform=dst_transform,
-                            dst_crs=dst_crs,
-                            resampling=Resampling.nearest
-                        )
-                
-                # Save change detection mask as georeferenced GeoTIFF in UTM
-                if "eroded_result" in st.session_state:
-                    change_mask_utm_path = os.path.join(temp_dir, f"change_mask_utm_{time.time()}.tif")
-                    with rasterio.open(
-                        change_mask_utm_path, 'w',
-                        driver='GTiff',
-                        height=st.session_state.eroded_result.shape[0],
-                        width=st.session_state.eroded_result.shape[1],
-                        count=1,
-                        dtype=st.session_state.eroded_result.dtype,
-                        crs=utm_crs,
-                        transform=utm_transform
-                    ) as dst:
-                        dst.write(st.session_state.eroded_result, 1)
-                    
-                    # Reproject to WGS84
-                    change_mask_wgs84_path = os.path.join(temp_dir, f"change_mask_wgs84_{time.time()}.tif")
-                    with rasterio.open(change_mask_utm_path) as src:
-                        # Use the same target dimensions and transform as the Sentinel-2 images if available
-                        if target_transform is not None:
-                            dst_transform = target_transform
-                            dst_width = target_width
-                            dst_height = target_height
-                        else:
-                            # Calculate the ideal dimensions and transformation parameters
-                            dst_transform, dst_width, dst_height = calculate_default_transform(
-                                src.crs, dst_crs, src.width, src.height, *src.bounds)
-                        
-                        # Create the WGS84 version
-                        dst_kwargs = src.meta.copy()
-                        dst_kwargs.update({
-                            'crs': dst_crs,
-                            'transform': dst_transform,
-                            'width': dst_width,
-                            'height': dst_height
-                        })
-                        
-                        with rasterio.open(change_mask_wgs84_path, 'w', **dst_kwargs) as dst:
-                            reproject(
-                                source=rasterio.band(src, 1),
-                                destination=rasterio.band(dst, 1),
-                                src_transform=src.transform,
-                                src_crs=src.crs,
-                                dst_transform=dst_transform,
-                                dst_crs=dst_crs,
-                                resampling=Resampling.nearest
-                            )
-                
-                # Add download buttons for classification maps only
-                st.subheader("Download Reprojected Data")
-                st.write("The following files have been reprojected from UTM to WGS84 coordinate system:")
-                
-                # Download buttons for classification maps
-                col1, col2, col3 = st.columns(3)
-                
-                with col1:
-                    if before_class_wgs84_path:
-                        with open(before_class_wgs84_path, "rb") as file:
-                            btn = st.download_button(
-                                label=f"Download {before_year} Classification",
-                                data=file,
-                                file_name=f"before_classification_{before_year}_wgs84.tif",
-                                mime="image/tiff",
-                                key=f"download_before_class_{before_year}"
-                            )
-                
-                with col2:
-                    if after_class_wgs84_path:
-                        with open(after_class_wgs84_path, "rb") as file:
-                            btn = st.download_button(
-                                label=f"Download {after_year} Classification",
-                                data=file,
-                                file_name=f"after_classification_{after_year}_wgs84.tif",
-                                mime="image/tiff",
-                                key=f"download_after_class_{after_year}"
-                            )
-                
-                with col3:
-                    if change_mask_wgs84_path:
-                        with open(change_mask_wgs84_path, "rb") as file:
-                            btn = st.download_button(
-                                label="Download Change Mask",
-                                data=file,
-                                file_name=f"change_mask_{before_year}_{after_year}_wgs84.tif",
-                                mime="image/tiff",
-                                key="download_change_mask"
-                            )
-            else:
-                # Fallback to simple PNG files if no georeference data is available
-                st.warning("No UTM coordinate information found. Files are not properly georeferenced.")
-                
-                # Add download buttons for PNG files (not reprojected)
-                st.subheader("Download Data")
-                st.write("Note: These files are not georeferenced as UTM coordinate information was not available.")
-                
-                # Classification maps
-                col1, col2, col3 = st.columns(3)
-                
-                with col1:
-                    # Create a PIL image and save it to a bytes buffer
-                    img = Image.fromarray((binary_before * 255).astype(np.uint8))
-                    buf = io.BytesIO()
-                    img.save(buf, format="PNG")
-                    
-                    btn = st.download_button(
-                        label=f"Download {before_year} Classification",
-                        data=buf.getvalue(),
-                        file_name=f"before_classification_{before_year}.png",
-                        mime="image/png",
-                        key=f"download_before_class_png_{before_year}"
-                    )
-                
-                with col2:
-                    # Create a PIL image and save it to a bytes buffer
-                    img = Image.fromarray((binary_after * 255).astype(np.uint8))
-                    buf = io.BytesIO()
-                    img.save(buf, format="PNG")
-                    
-                    btn = st.download_button(
-                        label=f"Download {after_year} Classification",
-                        data=buf.getvalue(),
-                        file_name=f"after_classification_{after_year}.png",
-                        mime="image/png",
-                        key=f"download_after_class_png_{after_year}"
-                    )
-                
-                with col3:
-                    # Create a PIL image and save it to a bytes buffer
-                    img = Image.fromarray(st.session_state.eroded_result)
-                    buf = io.BytesIO()
-                    img.save(buf, format="PNG")
-                    
-                    btn = st.download_button(
-                        label="Download Change Mask",
-                        data=buf.getvalue(),
-                        file_name=f"change_mask_{before_year}_{after_year}.png",
-                        mime="image/png",
-                        key="download_change_mask_png"
-                    )
-            
-            # Create the leafmap map
-            m = leafmap.Map(
-                center=center,
-                zoom=15,
-                height="600px"
-            )
-            
-            # Add base layers (will be at bottom of the stack)
-            m.add_basemap("SATELLITE")  # Google Satellite
-            m.add_basemap("ROADMAP")    # Google Maps
-            
-            # Add GeoTIFF layers with proper georeferencing
-            if utm_crs is not None and utm_transform is not None:
-                # Add drawn polygon to the map
-                if 'region_number' in st.session_state:
-                    # Create a GeoDataFrame from the polygon
-                    gdf = gpd.GeoDataFrame(geometry=[selected_polygon])
-                    gdf.crs = "EPSG:4326"  # Set the CRS to WGS84
-                    
-                    # Convert to proper GeoJSON format
-                    geojson_data = json.loads(gdf.to_json())
-                    
-                    # Add to map
-                    try:
-                        m.add_geojson(
-                            geojson_data,
-                            layer_name="Selected Region",
-                            style={
-                                'color': 'red',
-                                'fillColor': 'transparent',
-                                'weight': 2
-                            }
-                        )
-                    except Exception as e:
-                        st.warning(f"Could not add region boundary: {str(e)}")
-                        # Fallback: add a simple marker at the center
-                        m.add_marker(location=center, popup="Selected Region Center")
-                
-                # Add layers in the following order (bottom to top):
-                # 1. Sentinel-2 images (if available)
-                # 2. Before classification (green)
-                # 3. After classification (red)
-                # 4. Change detection mask
-                
-                if has_sentinel_data and before_rgb_wgs84_path and after_rgb_wgs84_path:
-                    # Add Sentinel-2 RGB images - using the RGB composites
-                    m.add_raster(
-                        before_rgb_wgs84_path,
-                        layer_name=f"Before Sentinel-2 ({before_year})",
-                        opacity=0.7
-                    )
-                    
-                    m.add_raster(
-                        after_rgb_wgs84_path,
-                        layer_name=f"After Sentinel-2 ({after_year})",
-                        opacity=0.7
-                    )
-                
-                # Add before classification with green colormap (for interactive map only)
-                m.add_raster(
-                    before_class_wgs84_path,
-                    layer_name=f"Before Classification ({before_year})",
-                    opacity=0.7,
-                    colormap="Greens"  # Green for interactive map
-                )
-                
-                # Add after classification with red colormap (for interactive map only)
-                m.add_raster(
-                    after_class_wgs84_path,
-                    layer_name=f"After Classification ({after_year})",
-                    opacity=0.7,
-                    colormap="Reds"  # Red for interactive map
-                )
-                
-                # Add change detection mask
-                m.add_raster(
-                    change_mask_wgs84_path,
-                    layer_name=f"Change Detection Mask ({before_year}-{after_year})",
-                    opacity=0.7,
-                    colormap="hot"
-                )
-                
-            else:
-                # Fallback for non-georeferenced data
-                st.warning("Cannot display non-georeferenced data in the interactive map.")
-            
-            # Add the standard layer control
-            m.add_layer_control()
-            
-            # Inject custom JavaScript to enhance layer control with embedded opacity sliders
-            # This mimics the Google Earth Engine style opacity controls
-            custom_js = """
-            <script>
-            // Function to add inline opacity sliders to layer control
-            function addInlineOpacityControls() {
-                // Wait for layer control to be available in the DOM
-                setTimeout(function() {
-                    // Find all layer control labels
-                    var labels = document.querySelectorAll('.leaflet-control-layers-overlays label');
-                    
-                    // Process each label
-                    labels.forEach(function(label) {
-                        // Skip if this label already has a slider
-                        if (label.querySelector('.inline-opacity-slider')) return;
-                        
-                        // Get the layer name from the label
-                        var layerName = label.textContent.trim();
-                        if (!layerName) return;
-                        
-                        // Create the slider container
-                        var sliderContainer = document.createElement('div');
-                        sliderContainer.className = 'inline-opacity-slider';
-                        sliderContainer.style.marginTop = '3px';
-                        sliderContainer.style.marginLeft = '20px';
-                        sliderContainer.style.width = 'calc(100% - 25px)';
-                        
-                        // Create the slider
-                        var slider = document.createElement('input');
-                        slider.type = 'range';
-                        slider.min = 0;
-                        slider.max = 100;
-                        slider.value = 70; // Default opacity 0.7
-                        slider.style.width = '100%';
-                        slider.style.height = '5px';
-                        slider.style.margin = '0';
-                        
-                        // Add the slider to its container
-                        sliderContainer.appendChild(slider);
-                        
-                        // Add the slider container to the label
-                        label.appendChild(sliderContainer);
-                        
-                        // Add event listener to the slider
-                        slider.addEventListener('input', function(e) {
-                            // Find the layer by name and update its opacity
-                            var mapLayers = Object.values(window.leafletMap._layers);
-                            for (var i = 0; i < mapLayers.length; i++) {
-                                var layer = mapLayers[i];
-                                // Check if this is the right layer
-                                if (layer.options && layer.options.name === layerName) {
-                                    layer.setOpacity(e.target.value / 100);
-                                    break;
-                                }
-                            }
-                        });
-                    });
-                }, 1000); // Wait 1 second for the layer control to be fully rendered
-            }
-            
-            // Store a reference to the map
-            if (document.readyState === 'complete' || document.readyState === 'interactive') {
-                setTimeout(function() {
-                    window.leafletMap = document.querySelector('.folium-map')._leaflet_map;
-                    addInlineOpacityControls();
-                    
-                    // Add listener for layer control expand/collapse
-                    var layerControl = document.querySelector('.leaflet-control-layers');
-                    if (layerControl) {
-                        layerControl.addEventListener('click', function() {
-                            setTimeout(addInlineOpacityControls, 100);
-                        });
-                    }
-                }, 1000);
-            } else {
-                document.addEventListener('DOMContentLoaded', function() {
-                    setTimeout(function() {
-                        window.leafletMap = document.querySelector('.folium-map')._leaflet_map;
-                        addInlineOpacityControls();
-                        
-                        // Add listener for layer control expand/collapse
-                        var layerControl = document.querySelector('.leaflet-control-layers');
-                        if (layerControl) {
-                            layerControl.addEventListener('click', function() {
-                                setTimeout(addInlineOpacityControls, 100);
-                            });
-                        }
-                    }, 1000);
-                });
-            }
-            </script>
-            
-            <style>
-            /* Style the opacity slider */
-            .inline-opacity-slider input[type=range] {
-                -webkit-appearance: none;
-                background: linear-gradient(to right, rgba(0,0,0,0.1), rgba(0,0,0,1));
-                height: 5px;
-                border-radius: 2px;
-            }
-            
-            .inline-opacity-slider input[type=range]::-webkit-slider-thumb {
-                -webkit-appearance: none;
-                width: 12px;
-                height: 12px;
-                border-radius: 50%;
-                background: #4285f4;
-                cursor: pointer;
-            }
-            
-            .inline-opacity-slider input[type=range]::-moz-range-thumb {
-                width: 12px;
-                height: 12px;
-                border-radius: 50%;
-                background: #4285f4;
-                cursor: pointer;
-            }
-            
-            /* Make the layer control wider to accommodate sliders */
-            .leaflet-control-layers {
-                min-width: 200px;
-            }
-            </style>
-            """
-            
-            # Display the map with custom JS injected
-            components = m.to_streamlit(height=600, add_layer_control=False)
-            
-            # Inject the custom JavaScript
-            st.components.v1.html(custom_js, height=0)
-            
-            # Add explanation for the interactive map
-            st.info("""
-            **Interactive Map Usage:**
-            - Use the layer control in the upper-right to toggle layers on/off
-            - Adjust layer opacity using the slider in the layer control
-            - Switch between Google Satellite and Google Maps base layers
-            - The map shows before classification in green and after classification in red
-            """)
-            
-        except Exception as e:
-            st.error(f"Error creating interactive map: {str(e)}")
-            import traceback
-            st.error(traceback.format_exc())
-    else:
-        st.info("After applying erosion, the interactive map will appear here.")
-
-# Second tab - Sentinel-2 "Before" Image Analysis
-with tab2:
-    st.header("Before Image Analysis")
-    
-    # Check if model path exists
-    if not os.path.exists(model_path):
-        st.warning(f"Model file not found at: {model_path}. Please update the path to your model file.")
-    
-    # Automated processing section
-    st.subheader("Automated Image Processing")
-    
-    if len(st.session_state.drawn_polygons) > 0:
-        # Let user select which polygon to use for processing
-        polygon_index = st.selectbox(
-            "Select region to process",
-            range(len(st.session_state.drawn_polygons)),
-            format_func=lambda i: f"Region {i+1}",
-            key="polygon_selector_before"
-        )
-        
-        selected_polygon = st.session_state.drawn_polygons[polygon_index]
-        region_number = polygon_index + 1 # For naming files
-        
-        # Calculate and display area
-        area_sq_km = selected_polygon.area * 111 * 111  # Approximate conversion from degrees to km²
-        st.info(f"Selected region area: ~{area_sq_km:.2f} km²")
-        
-        # Warn if area is large
-        if area_sq_km > 40:
-            st.warning(f"Selected area is large ({area_sq_km:.2f} km²). Processing will use tiling to handle the download size limit, which may take longer.")
-        
-        # Display selected time period
-        year = st.session_state.before_year
-        start_month = st.session_state.start_month
-        end_month = st.session_state.end_month
-        months = ["January", "February", "March", "April", "May", "June", 
-                 "July", "August", "September", "October", "November", "December"]
-        
-        st.info(f"Selected time period: {months[start_month-1]} to {months[end_month-1]} {year}")
-        
-        # Cloud cover slider
-        cloud_cover = st.slider("Maximum Cloud Cover (%)", 0, 100, 15, key="cloud_cover_before")
-        
-        # Process button
-        if st.button(f"Download and Process {year} Image ({months[start_month-1]}-{months[end_month-1]} Median)", key="process_before"):
-            st.info(f"Starting download of Sentinel-2 median composite for {months[start_month-1]}-{months[end_month-1]} {year}...")
-            
-            # Download Sentinel-2 image using GEES2Downloader
-            sentinel_before_path = download_sentinel2_with_gees2(year, selected_polygon, start_month, end_month, cloud_cover)
-            
-            if sentinel_before_path:
-                # Call the processing function
-                success = process_image(
-                    image_path=sentinel_before_path,
-                    year=year,
-                    selected_polygon=selected_polygon,
-                    region_number=region_number
-                )
-                
-                if success:
-                    st.success(f"✅ {year} image processing complete! You can now proceed to the Change Detection tab.")
-                else:
-                    st.error(f"❌ There was an error processing the {year} image. Please check the error messages above.")
-            else:
-                st.error("There is no proper image for download. Try increasing the cloud cover percentage or selecting a different region or time period.")
-        
-        # Show current status
-        if 'reconstructed_before_image' in st.session_state and st.session_state.reconstructed_before_image is not None:
-            st.success("✅ 'Before' image has already been processed successfully.")
-            
-            # Show the reconstructed image
-            st.subheader("Current 'Before' Classification Result")
-            fig, ax = plt.subplots(figsize=(8, 8))
-            ax.imshow(st.session_state.reconstructed_before_image, cmap='gray')
-            ax.set_title(f"{year} Building Classification")
-            ax.axis('off')
-            st.pyplot(fig)
-    else:
-        st.info("No regions have been selected yet. Please go to the Region Selection tab and draw a polygon.")
-
-# Third tab - Sentinel-2 "After" Image Analysis
-with tab3:
-    st.header("After Image Analysis")
-    
-    # Check if model path exists
-    if not os.path.exists(model_path):
-        st.warning(f"Model file not found at: {model_path}. Please update the path to your model file.")
-    
-    # Automated processing section
-    st.subheader("Automated Image Processing")
-    
-    if len(st.session_state.drawn_polygons) > 0:
-        # Let user select which polygon to use for processing
-        polygon_index = st.selectbox(
-            "Select region to process",
-            range(len(st.session_state.drawn_polygons)),
-            format_func=lambda i: f"Region {i+1}",
-            key="polygon_selector_after"
-        )
-        
-        selected_polygon = st.session_state.drawn_polygons[polygon_index]
-        region_number = polygon_index + 1 # For naming files
-        
-        # Calculate and display area
-        area_sq_km = selected_polygon.area * 111 * 111  # Approximate conversion from degrees to km²
-        st.info(f"Selected region area: ~{area_sq_km:.2f} km²")
-        
-        # Warn if area is large
-        if area_sq_km > 40:
-            st.warning(f"Selected area is large ({area_sq_km:.2f} km²). Processing will use tiling to handle the download size limit, which may take longer.")
-        
-        # Display selected time period
-        year = st.session_state.after_year
-        start_month = st.session_state.start_month
-        end_month = st.session_state.end_month
-        months = ["January", "February", "March", "April", "May", "June", 
-                 "July", "August", "September", "October", "November", "December"]
-        
-        st.info(f"Selected time period: {months[start_month-1]} to {months[end_month-1]} {year}")
-        
-        # Cloud cover slider
-        cloud_cover = st.slider("Maximum Cloud Cover (%)", 0, 100, 15, key="cloud_cover_after")
-        
-        # Process button
-        if st.button(f"Download and Process {year} Image ({months[start_month-1]}-{months[end_month-1]} Median)", key="process_after"):
-            st.info(f"Starting download of Sentinel-2 median composite for {months[start_month-1]}-{months[end_month-1]} {year}...")
-            
-            # Download Sentinel-2 image using GEES2Downloader
-            sentinel_after_path = download_sentinel2_with_gees2(year, selected_polygon, start_month, end_month, cloud_cover)
-            
-            if sentinel_after_path:
-                # Call the processing function
-                success = process_image(
-                    image_path=sentinel_after_path,
-                    year=year,
-                    selected_polygon=selected_polygon,
-                    region_number=region_number
-                )
-                
-                if success:
-                    st.success(f"✅ {year} image processing complete! You can now proceed to the Change Detection tab.")
-                else:
-                    st.error(f"❌ There was an error processing the {year} image. Please check the error messages above.")
-            else:
-                st.error("There is no proper image for download. Try increasing the cloud cover percentage or selecting a different region or time period.")
-        
-        # Show current status
-        if 'reconstructed_after_image' in st.session_state and st.session_state.reconstructed_after_image is not None:
-            st.success("✅ 'After' image has already been processed successfully.")
-            
-            # Show the reconstructed image
-            st.subheader("Current 'After' Classification Result")
-            fig, ax = plt.subplots(figsize=(8, 8))
-            ax.imshow(st.session_state.reconstructed_after_image, cmap='gray')
-            ax.set_title(f"{year} Building Classification")
-            ax.axis('off')
-            st.pyplot(fig)
-    else:
-        st.info("No regions have been selected yet. Please go to the Region Selection tab and draw a polygon.")
-
-# Fourth tab - Change Detection
-
-    st.header("Building Change Detection")
-    
-    # Get the years for display
-    before_year = st.session_state.before_year if 'before_year' in st.session_state else "2021"
-    after_year = st.session_state.after_year if 'after_year' in st.session_state else "2024"
-    
-    # Check if both reconstructed images are available
-    has_before_image = 'reconstructed_before_image' in st.session_state and st.session_state.reconstructed_before_image is not None
-    has_after_image = 'reconstructed_after_image' in st.session_state and st.session_state.reconstructed_after_image is not None
-    
-    if has_before_image and has_after_image:
-        st.success(f"Both {before_year} and {after_year} classification images are available for change detection")
-        
-        # Get the reconstructed images
-        img_before = st.session_state.reconstructed_before_image
-        img_after = st.session_state.reconstructed_after_image
-        
-        # Check if the images have the same dimensions
-        if img_before.shape != img_after.shape:
-            st.error("The two classification images have different dimensions. They need to be the same size for change detection.")
-            st.info(f"{before_year} image: {img_before.shape}, {after_year} image: {img_after.shape}")
-            
-            # Offer a solution if the dimensions don't match
-            st.warning("To perform change detection, both images need to be processed using the same region.")
-            st.info("Please go back to the Region Selection tab and ensure you use the same region for both time periods.")
-        else:
-            st.info("Processing change detection...")
-            
-            # Create binary versions of the images (0 or 1)
-            binary_before = (img_before > 0).astype(np.uint8)
-            binary_after = (img_after > 0).astype(np.uint8)
-            
-            # Detect new buildings (pixels where after=1 and before=0)
-            new_buildings = np.logical_and(binary_after == 1, binary_before == 0).astype(np.uint8) * 255
-            
-            # Store the change detection result
-            st.session_state.change_detection_result = new_buildings
-            
-            # Display the change detection results
-            fig, axes = plt.subplots(1, 3, figsize=(18, 6))
-            
-            # Before Classification
-            axes[0].imshow(binary_before, cmap='gray')
-            axes[0].set_title(f"{before_year} Building Classification")
-            axes[0].axis('off')
-            
-            # After Classification
-            axes[1].imshow(binary_after, cmap='gray')
-            axes[1].set_title(f"{after_year} Building Classification")
-            axes[1].axis('off')
-            
-            # New Buildings (Change Detection)
-            axes[2].imshow(new_buildings, cmap='hot')
-            axes[2].set_title(f"New Buildings ({before_year}-{after_year})")
-            axes[2].axis('off')
-            
-            plt.tight_layout()
-            st.pyplot(fig)
-            
-            # Morphological Erosion Section
-            st.subheader("Apply Morphological Erosion")
-            st.write("Erosion can help remove small noise and refine the change detection results.")
-            
-            # Dropdown for kernel size selection
-            kernel_size = st.selectbox("Select Erosion Kernel Size:", [2, 3, 4, 5, 7, 9], index=1)
-            
-            if st.button("Apply Erosion"):
-                # Apply erosion to the change detection result
-                eroded_result = apply_erosion(new_buildings, kernel_size)
-                
-                # Store the eroded result
-                st.session_state.eroded_result = eroded_result
-                
-                # Display the original and eroded results
-                fig, axes = plt.subplots(1, 2, figsize=(15, 7))
-                
-                # Original Change Detection
-                axes[0].imshow(new_buildings, cmap='hot')
-                axes[0].set_title("Original Change Detection")
-                axes[0].axis('off')
-                
-                # Eroded Result
-                axes[1].imshow(eroded_result, cmap='hot')
-                axes[1].set_title(f"After Erosion (Kernel Size: {kernel_size})")
-                axes[1].axis('off')
-                
-                plt.tight_layout()
-                st.pyplot(fig)
-                
-                # Save the eroded result
-                temp_dir = tempfile.mkdtemp()
-                output_filename = f"change_detection_{before_year}_{after_year}_eroded_k{kernel_size}.tif"
-                output_path = os.path.join(temp_dir, output_filename)
-                
-                # Get metadata from one of the reconstructed images
-                out_meta = st.session_state.clipped_meta.copy()
-                out_meta.update({
-                    'count': 1,
-                    'height': eroded_result.shape[0],
-                    'width': eroded_result.shape[1],
-                    'dtype': 'uint8'
-                })
-                
-                # Save as GeoTIFF
-                with rasterio.open(output_path, 'w', **out_meta) as dst:
-                    dst.write(eroded_result.astype(np.uint8), 1)
-                
-                st.success(f"Successfully saved eroded change detection result")
-                
-           
-                # Provide download link
-                with open(output_path, "rb") as file:
-                    st.download_button(
-                        label=f"Download Eroded Change Detection",
-                        data=file,
-                        file_name=output_filename,
-                        mime="image/tiff"
-                    )
-                
-                # Calculate statistics
-                total_pixels = eroded_result.size
-                building_pixels = np.sum(eroded_result > 0)
-                building_percentage = (building_pixels / total_pixels) * 100
-                
-                # Display statistics
-                st.subheader("Change Detection Statistics")
-                st.write(f"Total area analyzed: {total_pixels} pixels")
-                st.write(f"New building area: {building_pixels} pixels ({building_percentage:.2f}%)")
-                
-                # Create a simple bar chart
-                fig, ax = plt.subplots(figsize=(8, 5))
-                ax.bar(["Non-building", "New Buildings"], 
-                       [total_pixels - building_pixels, building_pixels])
-                ax.set_ylabel("Pixel Count")
-                ax.set_title("Change Detection Results")
-                
-                # Add percentage labels
-                ax.text(0, (total_pixels - building_pixels)/2, f"{100-building_percentage:.2f}%", 
-                       ha='center', va='center')
-                ax.text(1, building_pixels/2, f"{building_percentage:.2f}%", 
-                       ha='center', va='center')
-                
-                st.pyplot(fig)
-    else:
-        if not has_before_image and not has_after_image:
-            st.warning("Both 2021 and 2024 images need to be processed first.")
-            st.info("Please go to the Sentinel-2 2021 Analysis and Sentinel-2 2024 Analysis tabs to process the images.")
-        elif not has_before_image:
-            st.warning("2021 image needs to be processed first.")
-            st.info("Please go to the Sentinel-2 2021 Analysis tab to process the image.")
-        else:
-            st.warning("2024 image needs to be processed first.")
-            st.info("Please go to the Sentinel-2 2024 Analysis tab to process the image.")
 with tab4:
     st.header("Building Change Detection")
 
