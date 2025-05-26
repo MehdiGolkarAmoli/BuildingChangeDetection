@@ -248,7 +248,7 @@ if 'change_detection_result' not in st.session_state:
 
 # Google Drive model URL and local path
 gdrive_model_url = "https://drive.google.com/file/d/1m6EScw-mpBIvWV78h4pyjWq1OLQtn2ov/view?usp=drive_link"
-gdrive_model_url = "https://drive.google.com/file/d/1m6EScw-mpBIvWV78h4pyjWq1OLQtn2ov/view?usp=sharing"
+gdrive_model_url = "https://drive.google.com/file/d/1Fgn4j61XQQEoc_TnaUE5ClWDnzoopDgJ/view?usp=drive_link"
 model_path = "best_model_version_Unet++_v03_e7.pt"
 
 # Download model if it doesn't exist locally
@@ -560,7 +560,7 @@ def load_model(model_path):
     try:
         device = torch.device('cpu')
         model = smp.UnetPlusPlus(
-            encoder_name='timm-efficientnet-b7',
+            encoder_name='timm-efficientnet-b8',
             encoder_weights='imagenet',
             in_channels=12,  # 12 bands for Sentinel-2
             classes=1,
