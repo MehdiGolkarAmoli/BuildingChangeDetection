@@ -361,7 +361,7 @@ else:
     st.stop()
 
 # Create tabs for different pages
-tab1, tab2, tab3, tab4 = st.tabs(["Region Selection", "Before Image Analysis", "After Image Analysis", "Change Detection"])
+tab1, tab2, tab3,  = st.tabs(["Region Selection", "Before Image Analysis", "After Image Analysis", "Change Detection"])
 
 # Global variables
 if 'drawn_polygons' not in st.session_state:
@@ -1693,10 +1693,10 @@ with tab4:
     # 4) Display raw results side by side
     st.subheader("Raw Change Detection")
     fig, axs = plt.subplots(1, 3, figsize=(18, 5))
-    axs[0].imshow(binary_before, cmap="gray")  # Keep as black and white
+    axs[0].imshow(binary_before, cmap="gray")
     axs[0].set_title(f"{before_year} Classification")
     axs[0].axis("off")
-    axs[1].imshow(binary_after, cmap="gray")  # Keep as black and white
+    axs[1].imshow(binary_after, cmap="gray")
     axs[1].set_title(f"{after_year} Classification")
     axs[1].axis("off")
     axs[2].imshow(raw_mask, cmap="hot")
@@ -1707,7 +1707,6 @@ with tab4:
     # 5) Erosion UI
     st.subheader("Refine with Morphological Erosion")
     
-    # Use a unique key for the kernel size selectbox
     kernel = st.selectbox(
         "Kernel size",
         [2, 3, 4, 5, 7, 9],
@@ -1729,15 +1728,14 @@ with tab4:
         ax2.axis("off")
         st.pyplot(fig)
 
-    # 6) Interactive Map only once we have eroded_result
+    # 6) Interactive Map - CORRECTED VERSION
     if "eroded_result" in st.session_state:
         st.subheader("Interactive Map")
         
-        # Note about layer visibility
         st.info("Use the layer control in the top-right to toggle layers on/off and adjust opacity.")
         
         try:
-            # Get the polygon used for processing
+            # Get the polygon and center
             if 'region_number' in st.session_state and st.session_state.region_number <= len(st.session_state.drawn_polygons):
                 selected_polygon = st.session_state.drawn_polygons[st.session_state.region_number - 1]
                 centroid = selected_polygon.centroid
@@ -1745,100 +1743,63 @@ with tab4:
             else:
                 center = [35.6892, 51.3890]  # Default center (Tehran)
             
-            # Function to create RGB images from multispectral data
-            def create_rgb_image(img_array, bands=(3, 2, 1), percentile=(2, 98)):
-                """Create RGB composite from multispectral image array"""
-                h, w = img_array.shape[1], img_array.shape[2]
-                rgb = np.zeros((h, w, 3), dtype=np.float32)
-                
-                for i, band in enumerate(bands):
-                    if band < img_array.shape[0]:
-                        band_data = img_array[band]
-                        # Simple contrast stretch
-                        min_val = np.percentile(band_data, percentile[0])
-                        max_val = np.percentile(band_data, percentile[1])
-                        rgb[:, :, i] = np.clip((band_data - min_val) / (max_val - min_val), 0, 1)
-                
-                return rgb
-            
-            # Create and save the images as temporary files
-            temp_dir = tempfile.gettempdir()
-            
-            # Check if we have the clipped Sentinel-2 data in memory
-            has_sentinel_data = (
-                'clipped_img' in st.session_state and 
-                'clipped_img_2024' in st.session_state and
-                'clipped_meta' in st.session_state
+            # Check if we have the required geospatial metadata
+            has_geospatial_data = (
+                'clipped_meta' in st.session_state and 
+                st.session_state.clipped_meta is not None and
+                'crs' in st.session_state.clipped_meta and
+                'transform' in st.session_state.clipped_meta
             )
             
-            # Get bounds and CRS information
-            if 'clipped_meta' in st.session_state:
-                # Get the UTM transform and CRS from the sentinel data
-                utm_transform = st.session_state.clipped_meta['transform']
-                utm_crs = st.session_state.clipped_meta['crs']
-                utm_height = st.session_state.clipped_img.shape[1]
-                utm_width = st.session_state.clipped_img.shape[2]
-                bounds = selected_polygon.bounds  # Use polygon bounds
-            else:
-                # Fallback to polygon bounds
-                bounds = selected_polygon.bounds
-                utm_crs = None
-                utm_transform = None
-                utm_height = binary_before.shape[0]
-                utm_width = binary_before.shape[1]
+            if not has_geospatial_data:
+                st.error("Missing geospatial metadata. Cannot create properly georeferenced map.")
+                st.info("Please ensure that the images were processed with proper coordinate system information.")
+                st.stop()
             
-            # Variables to store paths for download buttons
-            before_class_wgs84_path = None
-            after_class_wgs84_path = None
-            change_mask_wgs84_path = None
-            before_rgb_wgs84_path = None
-            after_rgb_wgs84_path = None
+            # Get UTM metadata
+            utm_crs = st.session_state.clipped_meta['crs']
+            utm_transform = st.session_state.clipped_meta['transform']
             
-            # Store target resolution for consistent reprojection
-            target_resolution_x = None
-            target_resolution_y = None
-            target_width = None
-            target_height = None
-            target_transform = None
+            # Create temporary directory
+            temp_dir = tempfile.mkdtemp()
+            st.info(f"Creating temporary files in: {temp_dir}")
             
-            # Process and save Sentinel-2 images first to determine target resolution
-            if has_sentinel_data:
-                # Save Sentinel-2 images (first 4 bands) as GeoTIFF files
-                before_sentinel_utm_path = os.path.join(temp_dir, f"before_sentinel_utm_{before_year}_{time.time()}.tif")
+            # Function to create and save georeferenced GeoTIFF
+            def save_georeferenced_tiff(data, filename, crs, transform, dtype='uint8'):
+                """Save numpy array as georeferenced GeoTIFF"""
+                filepath = os.path.join(temp_dir, filename)
                 
-                # Get the first 4 bands (B, G, R, NIR)
-                before_bands = st.session_state.clipped_img[:4, :, :]
+                # Ensure data is 2D
+                if len(data.shape) == 3:
+                    data = data.squeeze()
                 
                 with rasterio.open(
-                    before_sentinel_utm_path, 'w',
+                    filepath, 'w',
                     driver='GTiff',
-                    height=before_bands.shape[1],
-                    width=before_bands.shape[2],
-                    count=4,  # 4 bands
-                    dtype=before_bands.dtype,
-                    crs=utm_crs,
-                    transform=utm_transform
+                    height=data.shape[0],
+                    width=data.shape[1],
+                    count=1,
+                    dtype=dtype,
+                    crs=crs,
+                    transform=transform,
+                    compress='lzw'  # Add compression
                 ) as dst:
-                    for i in range(4):
-                        dst.write(before_bands[i], i+1)
+                    dst.write(data.astype(dtype), 1)
                 
-                # Reproject Sentinel-2 before image to WGS84
-                before_sentinel_wgs84_path = os.path.join(temp_dir, f"before_sentinel_wgs84_{before_year}_{time.time()}.tif")
-                with rasterio.open(before_sentinel_utm_path) as src:
-                    # Calculate the ideal dimensions and transformation parameters
+                return filepath
+            
+            # Function to reproject to WGS84
+            def reproject_to_wgs84(src_path, dst_filename):
+                """Reproject GeoTIFF to WGS84"""
+                dst_path = os.path.join(temp_dir, dst_filename)
+                
+                with rasterio.open(src_path) as src:
+                    # Calculate target transform and dimensions
                     dst_transform, dst_width, dst_height = calculate_default_transform(
-                        src.crs, 'EPSG:4326', src.width, src.height, *src.bounds)
+                        src.crs, 'EPSG:4326', src.width, src.height, *src.bounds
+                    )
                     
-                    # Store these values for consistent reprojection of all layers
-                    target_transform = dst_transform
-                    target_width = dst_width
-                    target_height = dst_height
-                    
-                    # Calculate resolution
-                    target_resolution_x = (src.bounds.right - src.bounds.left) / dst_width
-                    target_resolution_y = (src.bounds.top - src.bounds.bottom) / dst_height
-                    
-                    # Create the WGS84 version
+                    # Update metadata
                     dst_kwargs = src.meta.copy()
                     dst_kwargs.update({
                         'crs': 'EPSG:4326',
@@ -1847,574 +1808,311 @@ with tab4:
                         'height': dst_height
                     })
                     
-                    with rasterio.open(before_sentinel_wgs84_path, 'w', **dst_kwargs) as dst:
-                        for i in range(1, 5):  # 4 bands
-                            reproject(
-                                source=rasterio.band(src, i),
-                                destination=rasterio.band(dst, i),
-                                src_transform=src.transform,
-                                src_crs=src.crs,
-                                dst_transform=dst_transform,
-                                dst_crs='EPSG:4326',
-                                resampling=Resampling.nearest
-                            )
+                    # Create reprojected file
+                    with rasterio.open(dst_path, 'w', **dst_kwargs) as dst:
+                        reproject(
+                            source=rasterio.band(src, 1),
+                            destination=rasterio.band(dst, 1),
+                            src_transform=src.transform,
+                            src_crs=src.crs,
+                            dst_transform=dst_transform,
+                            dst_crs='EPSG:4326',
+                            resampling=Resampling.nearest
+                        )
                 
-                # Save Sentinel-2 after image (first 4 bands) as GeoTIFF
-                after_sentinel_utm_path = os.path.join(temp_dir, f"after_sentinel_utm_{after_year}_{time.time()}.tif")
-                
-                # Get the first 4 bands (B, G, R, NIR)
-                after_bands = st.session_state.clipped_img_2024[:4, :, :]
-                
-                with rasterio.open(
-                    after_sentinel_utm_path, 'w',
-                    driver='GTiff',
-                    height=after_bands.shape[1],
-                    width=after_bands.shape[2],
-                    count=4,  # 4 bands
-                    dtype=after_bands.dtype,
-                    crs=utm_crs,
-                    transform=utm_transform
-                ) as dst:
-                    for i in range(4):
-                        dst.write(after_bands[i], i+1)
-                
-                # Reproject Sentinel-2 after image to WGS84
-                after_sentinel_wgs84_path = os.path.join(temp_dir, f"after_sentinel_wgs84_{after_year}_{time.time()}.tif")
-                with rasterio.open(after_sentinel_utm_path) as src:
-                    # Use the same dimensions and transform as the before image for consistency
-                    dst_kwargs = src.meta.copy()
-                    dst_kwargs.update({
-                        'crs': 'EPSG:4326',
-                        'transform': target_transform,
-                        'width': target_width,
-                        'height': target_height
-                    })
-                    
-                    with rasterio.open(after_sentinel_wgs84_path, 'w', **dst_kwargs) as dst:
-                        for i in range(1, 5):  # 4 bands
-                            reproject(
-                                source=rasterio.band(src, i),
-                                destination=rasterio.band(dst, i),
-                                src_transform=src.transform,
-                                src_crs=src.crs,
-                                dst_transform=target_transform,
-                                dst_crs='EPSG:4326',
-                                resampling=Resampling.nearest
-                            )
-                
-                # Create RGB GeoTIFFs for leafmap display
-                before_rgb_wgs84_path = os.path.join(temp_dir, f"before_rgb_wgs84_{before_year}_{time.time()}.tif")
-                with rasterio.open(before_sentinel_wgs84_path) as src:
-                    profile = src.profile.copy()
-                    profile.update(count=3)  # RGB has 3 bands
-                    with rasterio.open(before_rgb_wgs84_path, 'w', **profile) as dst:
-                        # Use bands 3,2,1 (R,G,B) from the 4-band image
-                        rgb_data = np.zeros((3, src.height, src.width), dtype=np.uint8)
-                        for i, band_idx in enumerate([3, 2, 1]):  # R,G,B bands
-                            band_data = src.read(band_idx)
-                            # Simple contrast stretch
-                            min_val = np.percentile(band_data, 2)
-                            max_val = np.percentile(band_data, 98)
-                            rgb_data[i] = np.clip((band_data - min_val) / (max_val - min_val) * 255, 0, 255).astype(np.uint8)
-                        dst.write(rgb_data)
-                
-                after_rgb_wgs84_path = os.path.join(temp_dir, f"after_rgb_wgs84_{after_year}_{time.time()}.tif")
-                with rasterio.open(after_sentinel_wgs84_path) as src:
-                    profile = src.profile.copy()
-                    profile.update(count=3)  # RGB has 3 bands
-                    with rasterio.open(after_rgb_wgs84_path, 'w', **profile) as dst:
-                        # Use bands 3,2,1 (R,G,B) from the 4-band image
-                        rgb_data = np.zeros((3, src.height, src.width), dtype=np.uint8)
-                        for i, band_idx in enumerate([3, 2, 1]):  # R,G,B bands
-                            band_data = src.read(band_idx)
-                            # Simple contrast stretch
-                            min_val = np.percentile(band_data, 2)
-                            max_val = np.percentile(band_data, 98)
-                            rgb_data[i] = np.clip((band_data - min_val) / (max_val - min_val) * 255, 0, 255).astype(np.uint8)
-                        dst.write(rgb_data)
+                return dst_path
             
-            # Create properly georeferenced GeoTIFFs for classification results
-            if utm_crs is not None and utm_transform is not None:
-                # Define WGS84 as target CRS
-                dst_crs = 'EPSG:4326'  # WGS84
+            # Step 1: Create UTM GeoTIFFs
+            st.info("Step 1: Creating UTM GeoTIFFs...")
+            
+            # Save classification results in UTM
+            before_utm_path = save_georeferenced_tiff(
+                binary_before, f'before_class_utm_{time.time()}.tif', 
+                utm_crs, utm_transform, 'uint8'
+            )
+            
+            after_utm_path = save_georeferenced_tiff(
+                binary_after, f'after_class_utm_{time.time()}.tif', 
+                utm_crs, utm_transform, 'uint8'
+            )
+            
+            change_utm_path = save_georeferenced_tiff(
+                st.session_state.eroded_result, f'change_utm_{time.time()}.tif', 
+                utm_crs, utm_transform, 'uint8'
+            )
+            
+            # Step 2: Reproject to WGS84
+            st.info("Step 2: Reprojecting to WGS84...")
+            
+            before_wgs84_path = reproject_to_wgs84(before_utm_path, f'before_class_wgs84_{time.time()}.tif')
+            after_wgs84_path = reproject_to_wgs84(after_utm_path, f'after_class_wgs84_{time.time()}.tif')
+            change_wgs84_path = reproject_to_wgs84(change_utm_path, f'change_wgs84_{time.time()}.tif')
+            
+            # Step 3: Create Sentinel-2 RGB composites if available
+            sentinel_before_wgs84_path = None
+            sentinel_after_wgs84_path = None
+            
+            if ('clipped_img' in st.session_state and 
+                'clipped_img_2024' in st.session_state and
+                st.session_state.clipped_img is not None and
+                st.session_state.clipped_img_2024 is not None):
                 
-                # Save before classification as georeferenced GeoTIFF in UTM
-                before_class_utm_path = os.path.join(temp_dir, f"before_class_utm_{before_year}_{time.time()}.tif")
-                with rasterio.open(
-                    before_class_utm_path, 'w',
-                    driver='GTiff',
-                    height=binary_before.shape[0],
-                    width=binary_before.shape[1],
-                    count=1,
-                    dtype=binary_before.dtype,
-                    crs=utm_crs,
-                    transform=utm_transform
-                ) as dst:
-                    dst.write(binary_before, 1)
+                st.info("Step 3: Creating Sentinel-2 RGB composites...")
                 
-                # Reproject to WGS84
-                before_class_wgs84_path = os.path.join(temp_dir, f"before_class_wgs84_{before_year}_{time.time()}.tif")
-                with rasterio.open(before_class_utm_path) as src:
-                    # Use the same target dimensions and transform as the Sentinel-2 images if available
-                    if target_transform is not None:
-                        dst_transform = target_transform
-                        dst_width = target_width
-                        dst_height = target_height
-                    else:
-                        # Calculate the ideal dimensions and transformation parameters
-                        dst_transform, dst_width, dst_height = calculate_default_transform(
-                            src.crs, dst_crs, src.width, src.height, *src.bounds)
-                    
-                    # Create the WGS84 version
-                    dst_kwargs = src.meta.copy()
-                    dst_kwargs.update({
-                        'crs': dst_crs,
-                        'transform': dst_transform,
-                        'width': dst_width,
-                        'height': dst_height
-                    })
-                    
-                    with rasterio.open(before_class_wgs84_path, 'w', **dst_kwargs) as dst:
-                        reproject(
-                            source=rasterio.band(src, 1),
-                            destination=rasterio.band(dst, 1),
-                            src_transform=src.transform,
-                            src_crs=src.crs,
-                            dst_transform=dst_transform,
-                            dst_crs=dst_crs,
-                            resampling=Resampling.nearest
-                        )
-                
-                # Save after classification as georeferenced GeoTIFF in UTM
-                after_class_utm_path = os.path.join(temp_dir, f"after_class_utm_{after_year}_{time.time()}.tif")
-                with rasterio.open(
-                    after_class_utm_path, 'w',
-                    driver='GTiff',
-                    height=binary_after.shape[0],
-                    width=binary_after.shape[1],
-                    count=1,
-                    dtype=binary_after.dtype,
-                    crs=utm_crs,
-                    transform=utm_transform
-                ) as dst:
-                    dst.write(binary_after, 1)
-                
-                # Reproject to WGS84
-                after_class_wgs84_path = os.path.join(temp_dir, f"after_class_wgs84_{after_year}_{time.time()}.tif")
-                with rasterio.open(after_class_utm_path) as src:
-                    # Use the same target dimensions and transform as the Sentinel-2 images if available
-                    if target_transform is not None:
-                        dst_transform = target_transform
-                        dst_width = target_width
-                        dst_height = target_height
-                    else:
-                        # Calculate the ideal dimensions and transformation parameters
-                        dst_transform, dst_width, dst_height = calculate_default_transform(
-                            src.crs, dst_crs, src.width, src.height, *src.bounds)
-                    
-                    # Create the WGS84 version
-                    dst_kwargs = src.meta.copy()
-                    dst_kwargs.update({
-                        'crs': dst_crs,
-                        'transform': dst_transform,
-                        'width': dst_width,
-                        'height': dst_height
-                    })
-                    
-                    with rasterio.open(after_class_wgs84_path, 'w', **dst_kwargs) as dst:
-                        reproject(
-                            source=rasterio.band(src, 1),
-                            destination=rasterio.band(dst, 1),
-                            src_transform=src.transform,
-                            src_crs=src.crs,
-                            dst_transform=dst_transform,
-                            dst_crs=dst_crs,
-                            resampling=Resampling.nearest
-                        )
-                
-                # Save change detection mask as georeferenced GeoTIFF in UTM
-                if "eroded_result" in st.session_state:
-                    change_mask_utm_path = os.path.join(temp_dir, f"change_mask_utm_{time.time()}.tif")
-                    with rasterio.open(
-                        change_mask_utm_path, 'w',
-                        driver='GTiff',
-                        height=st.session_state.eroded_result.shape[0],
-                        width=st.session_state.eroded_result.shape[1],
-                        count=1,
-                        dtype=st.session_state.eroded_result.dtype,
-                        crs=utm_crs,
-                        transform=utm_transform
-                    ) as dst:
-                        dst.write(st.session_state.eroded_result, 1)
-                    
-                    # Reproject to WGS84
-                    change_mask_wgs84_path = os.path.join(temp_dir, f"change_mask_wgs84_{time.time()}.tif")
-                    with rasterio.open(change_mask_utm_path) as src:
-                        # Use the same target dimensions and transform as the Sentinel-2 images if available
-                        if target_transform is not None:
-                            dst_transform = target_transform
-                            dst_width = target_width
-                            dst_height = target_height
-                        else:
-                            # Calculate the ideal dimensions and transformation parameters
+                def create_rgb_composite(sentinel_data, filename):
+                    """Create RGB composite from Sentinel-2 data"""
+                    # Use bands 4,3,2 (Red, Green, Blue) - 0-indexed: 3,2,1
+                    if sentinel_data.shape[0] >= 4:
+                        rgb_data = sentinel_data[[3,2,1], :, :]  # R,G,B bands
+                        
+                        # Normalize each band
+                        rgb_normalized = np.zeros_like(rgb_data, dtype=np.uint8)
+                        for i in range(3):
+                            band = rgb_data[i]
+                            # Contrast stretch
+                            p2, p98 = np.percentile(band, (2, 98))
+                            band_stretched = np.clip((band - p2) / (p98 - p2) * 255, 0, 255)
+                            rgb_normalized[i] = band_stretched.astype(np.uint8)
+                        
+                        # Save as UTM GeoTIFF
+                        utm_path = os.path.join(temp_dir, f'sentinel_utm_{filename}')
+                        with rasterio.open(
+                            utm_path, 'w',
+                            driver='GTiff',
+                            height=rgb_normalized.shape[1],
+                            width=rgb_normalized.shape[2],
+                            count=3,
+                            dtype='uint8',
+                            crs=utm_crs,
+                            transform=utm_transform,
+                            compress='lzw'
+                        ) as dst:
+                            dst.write(rgb_normalized)
+                        
+                        # Reproject to WGS84
+                        wgs84_path = os.path.join(temp_dir, f'sentinel_wgs84_{filename}')
+                        with rasterio.open(utm_path) as src:
                             dst_transform, dst_width, dst_height = calculate_default_transform(
-                                src.crs, dst_crs, src.width, src.height, *src.bounds)
+                                src.crs, 'EPSG:4326', src.width, src.height, *src.bounds
+                            )
+                            
+                            dst_kwargs = src.meta.copy()
+                            dst_kwargs.update({
+                                'crs': 'EPSG:4326',
+                                'transform': dst_transform,
+                                'width': dst_width,
+                                'height': dst_height
+                            })
+                            
+                            with rasterio.open(wgs84_path, 'w', **dst_kwargs) as dst:
+                                for i in range(1, 4):  # 3 RGB bands
+                                    reproject(
+                                        source=rasterio.band(src, i),
+                                        destination=rasterio.band(dst, i),
+                                        src_transform=src.transform,
+                                        src_crs=src.crs,
+                                        dst_transform=dst_transform,
+                                        dst_crs='EPSG:4326',
+                                        resampling=Resampling.bilinear
+                                    )
                         
-                        # Create the WGS84 version
-                        dst_kwargs = src.meta.copy()
-                        dst_kwargs.update({
-                            'crs': dst_crs,
-                            'transform': dst_transform,
-                            'width': dst_width,
-                            'height': dst_height
-                        })
-                        
-                        with rasterio.open(change_mask_wgs84_path, 'w', **dst_kwargs) as dst:
-                            reproject(
-                                source=rasterio.band(src, 1),
-                                destination=rasterio.band(dst, 1),
-                                src_transform=src.transform,
-                                src_crs=src.crs,
-                                dst_transform=dst_transform,
-                                dst_crs=dst_crs,
-                                resampling=Resampling.nearest
-                            )
+                        return wgs84_path
+                    return None
                 
-                # Add download buttons for classification maps only
-                st.subheader("Download Reprojected Data")
-                st.write("The following files have been reprojected from UTM to WGS84 coordinate system:")
-                
-                # Download buttons for classification maps
-                col1, col2, col3 = st.columns(3)
-                
-                with col1:
-                    if before_class_wgs84_path:
-                        with open(before_class_wgs84_path, "rb") as file:
-                            btn = st.download_button(
-                                label=f"Download {before_year} Classification",
-                                data=file,
-                                file_name=f"before_classification_{before_year}_wgs84.tif",
-                                mime="image/tiff",
-                                key=f"download_before_class_{before_year}"
-                            )
-                
-                with col2:
-                    if after_class_wgs84_path:
-                        with open(after_class_wgs84_path, "rb") as file:
-                            btn = st.download_button(
-                                label=f"Download {after_year} Classification",
-                                data=file,
-                                file_name=f"after_classification_{after_year}_wgs84.tif",
-                                mime="image/tiff",
-                                key=f"download_after_class_{after_year}"
-                            )
-                
-                with col3:
-                    if change_mask_wgs84_path:
-                        with open(change_mask_wgs84_path, "rb") as file:
-                            btn = st.download_button(
-                                label="Download Change Mask",
-                                data=file,
-                                file_name=f"change_mask_{before_year}_{after_year}_wgs84.tif",
-                                mime="image/tiff",
-                                key="download_change_mask"
-                            )
-            else:
-                # Fallback to simple PNG files if no georeference data is available
-                st.warning("No UTM coordinate information found. Files are not properly georeferenced.")
-                
-                # Add download buttons for PNG files (not reprojected)
-                st.subheader("Download Data")
-                st.write("Note: These files are not georeferenced as UTM coordinate information was not available.")
-                
-                # Classification maps
-                col1, col2, col3 = st.columns(3)
-                
-                with col1:
-                    # Create a PIL image and save it to a bytes buffer
-                    img = Image.fromarray((binary_before * 255).astype(np.uint8))
-                    buf = io.BytesIO()
-                    img.save(buf, format="PNG")
-                    
-                    btn = st.download_button(
-                        label=f"Download {before_year} Classification",
-                        data=buf.getvalue(),
-                        file_name=f"before_classification_{before_year}.png",
-                        mime="image/png",
-                        key=f"download_before_class_png_{before_year}"
-                    )
-                
-                with col2:
-                    # Create a PIL image and save it to a bytes buffer
-                    img = Image.fromarray((binary_after * 255).astype(np.uint8))
-                    buf = io.BytesIO()
-                    img.save(buf, format="PNG")
-                    
-                    btn = st.download_button(
-                        label=f"Download {after_year} Classification",
-                        data=buf.getvalue(),
-                        file_name=f"after_classification_{after_year}.png",
-                        mime="image/png",
-                        key=f"download_after_class_png_{after_year}"
-                    )
-                
-                with col3:
-                    # Create a PIL image and save it to a bytes buffer
-                    img = Image.fromarray(st.session_state.eroded_result)
-                    buf = io.BytesIO()
-                    img.save(buf, format="PNG")
-                    
-                    btn = st.download_button(
-                        label="Download Change Mask",
-                        data=buf.getvalue(),
-                        file_name=f"change_mask_{before_year}_{after_year}.png",
-                        mime="image/png",
-                        key="download_change_mask_png"
-                    )
+                sentinel_before_wgs84_path = create_rgb_composite(
+                    st.session_state.clipped_img, f'{before_year}_{time.time()}.tif'
+                )
+                sentinel_after_wgs84_path = create_rgb_composite(
+                    st.session_state.clipped_img_2024, f'{after_year}_{time.time()}.tif'
+                )
             
-            # Create the leafmap map
+            # Step 4: Verify files exist and have data
+            st.info("Step 4: Verifying created files...")
+            
+            files_to_check = [
+                (before_wgs84_path, f"Before Classification ({before_year})"),
+                (after_wgs84_path, f"After Classification ({after_year})"),
+                (change_wgs84_path, "Change Detection Mask")
+            ]
+            
+            if sentinel_before_wgs84_path:
+                files_to_check.append((sentinel_before_wgs84_path, f"Sentinel-2 Before ({before_year})"))
+            if sentinel_after_wgs84_path:
+                files_to_check.append((sentinel_after_wgs84_path, f"Sentinel-2 After ({after_year})"))
+            
+            valid_files = []
+            for filepath, name in files_to_check:
+                if filepath and os.path.exists(filepath):
+                    try:
+                        with rasterio.open(filepath) as src:
+                            if src.count > 0 and src.width > 0 and src.height > 0:
+                                valid_files.append((filepath, name))
+                                st.success(f"✅ {name}: {src.width}x{src.height}, {src.count} bands")
+                            else:
+                                st.warning(f"⚠️ {name}: Invalid dimensions")
+                    except Exception as e:
+                        st.error(f"❌ {name}: Error reading file - {str(e)}")
+                else:
+                    st.warning(f"⚠️ {name}: File not found")
+            
+            if len(valid_files) == 0:
+                st.error("No valid files created. Cannot display map.")
+                st.stop()
+            
+            # Step 5: Create the interactive map
+            st.info("Step 5: Creating interactive map...")
+            
+            # Create leafmap
             m = leafmap.Map(
                 center=center,
                 zoom=15,
                 height="600px"
             )
             
-            # Add base layers (will be at bottom of the stack)
-            m.add_basemap("SATELLITE")  # Google Satellite
-            m.add_basemap("ROADMAP")    # Google Maps
+            # Add base layers
+            m.add_basemap("SATELLITE")
+            m.add_basemap("ROADMAP")
             
-            # Add GeoTIFF layers with proper georeferencing
-            if utm_crs is not None and utm_transform is not None:
-                # Add drawn polygon to the map
-                if 'region_number' in st.session_state:
-                    # Create a GeoDataFrame from the polygon
-                    gdf = gpd.GeoDataFrame(geometry=[selected_polygon])
-                    gdf.crs = "EPSG:4326"  # Set the CRS to WGS84
-                    
-                    # Convert to proper GeoJSON format
+            # Add polygon boundary if available
+            if 'region_number' in st.session_state and st.session_state.region_number <= len(st.session_state.drawn_polygons):
+                try:
+                    # Create GeoDataFrame
+                    gdf = gpd.GeoDataFrame(geometry=[selected_polygon], crs="EPSG:4326")
                     geojson_data = json.loads(gdf.to_json())
                     
-                    # Add to map
-                    try:
-                        m.add_geojson(
-                            geojson_data,
-                            layer_name="Selected Region",
-                            style={
-                                'color': 'red',
-                                'fillColor': 'transparent',
-                                'weight': 2
-                            }
-                        )
-                    except Exception as e:
-                        st.warning(f"Could not add region boundary: {str(e)}")
-                        # Fallback: add a simple marker at the center
-                        m.add_marker(location=center, popup="Selected Region Center")
-                
-                # Add layers in the following order (bottom to top):
-                # 1. Sentinel-2 images (if available)
-                # 2. Before classification (green)
-                # 3. After classification (red)
-                # 4. Change detection mask
-                
-                if has_sentinel_data and before_rgb_wgs84_path and after_rgb_wgs84_path:
-                    # Add Sentinel-2 RGB images - using the RGB composites
-                    m.add_raster(
-                        before_rgb_wgs84_path,
-                        layer_name=f"Before Sentinel-2 ({before_year})",
-                        opacity=0.7
+                    m.add_geojson(
+                        geojson_data,
+                        layer_name="Selected Region",
+                        style={'color': 'yellow', 'fillColor': 'transparent', 'weight': 3}
                     )
-                    
+                except Exception as e:
+                    st.warning(f"Could not add region boundary: {str(e)}")
+                    m.add_marker(location=center, popup="Region Center")
+            
+            # Add raster layers with proper error handling
+            layers_added = 0
+            
+            # Add Sentinel-2 layers first (background)
+            if sentinel_before_wgs84_path and os.path.exists(sentinel_before_wgs84_path):
+                try:
                     m.add_raster(
-                        after_rgb_wgs84_path,
-                        layer_name=f"After Sentinel-2 ({after_year})",
-                        opacity=0.7
+                        sentinel_before_wgs84_path,
+                        layer_name=f"Sentinel-2 Before ({before_year})",
+                        opacity=0.8
                     )
-                
-                # Add before classification with green colormap (for interactive map only)
+                    layers_added += 1
+                    st.success(f"✅ Added Sentinel-2 Before layer")
+                except Exception as e:
+                    st.warning(f"Could not add Sentinel-2 Before layer: {str(e)}")
+            
+            if sentinel_after_wgs84_path and os.path.exists(sentinel_after_wgs84_path):
+                try:
+                    m.add_raster(
+                        sentinel_after_wgs84_path,
+                        layer_name=f"Sentinel-2 After ({after_year})",
+                        opacity=0.8
+                    )
+                    layers_added += 1
+                    st.success(f"✅ Added Sentinel-2 After layer")
+                except Exception as e:
+                    st.warning(f"Could not add Sentinel-2 After layer: {str(e)}")
+            
+            # Add classification layers
+            try:
                 m.add_raster(
-                    before_class_wgs84_path,
-                    layer_name=f"Before Classification ({before_year})",
+                    before_wgs84_path,
+                    layer_name=f"Buildings Before ({before_year})",
                     opacity=0.7,
-                    colormap="Greens"  # Green for interactive map
+                    colormap="Greens"
                 )
-                
-                # Add after classification with red colormap (for interactive map only)
+                layers_added += 1
+                st.success(f"✅ Added Before Classification layer")
+            except Exception as e:
+                st.warning(f"Could not add Before Classification layer: {str(e)}")
+            
+            try:
                 m.add_raster(
-                    after_class_wgs84_path,
-                    layer_name=f"After Classification ({after_year})",
+                    after_wgs84_path,
+                    layer_name=f"Buildings After ({after_year})",
                     opacity=0.7,
-                    colormap="Reds"  # Red for interactive map
+                    colormap="Reds"
                 )
-                
-                # Add change detection mask
+                layers_added += 1
+                st.success(f"✅ Added After Classification layer")
+            except Exception as e:
+                st.warning(f"Could not add After Classification layer: {str(e)}")
+            
+            # Add change detection layer
+            try:
                 m.add_raster(
-                    change_mask_wgs84_path,
-                    layer_name=f"Change Detection Mask ({before_year}-{after_year})",
-                    opacity=0.7,
+                    change_wgs84_path,
+                    layer_name=f"New Buildings ({before_year}-{after_year})",
+                    opacity=0.8,
                     colormap="hot"
                 )
-                
-            else:
-                # Fallback for non-georeferenced data
-                st.warning("Cannot display non-georeferenced data in the interactive map.")
+                layers_added += 1
+                st.success(f"✅ Added Change Detection layer")
+            except Exception as e:
+                st.warning(f"Could not add Change Detection layer: {str(e)}")
             
-            # Add the standard layer control
+            # Add layer control
             m.add_layer_control()
             
-            # Inject custom JavaScript to enhance layer control with embedded opacity sliders
-            # This mimics the Google Earth Engine style opacity controls
-            custom_js = """
-            <script>
-            // Function to add inline opacity sliders to layer control
-            function addInlineOpacityControls() {
-                // Wait for layer control to be available in the DOM
-                setTimeout(function() {
-                    // Find all layer control labels
-                    var labels = document.querySelectorAll('.leaflet-control-layers-overlays label');
-                    
-                    // Process each label
-                    labels.forEach(function(label) {
-                        // Skip if this label already has a slider
-                        if (label.querySelector('.inline-opacity-slider')) return;
-                        
-                        // Get the layer name from the label
-                        var layerName = label.textContent.trim();
-                        if (!layerName) return;
-                        
-                        // Create the slider container
-                        var sliderContainer = document.createElement('div');
-                        sliderContainer.className = 'inline-opacity-slider';
-                        sliderContainer.style.marginTop = '3px';
-                        sliderContainer.style.marginLeft = '20px';
-                        sliderContainer.style.width = 'calc(100% - 25px)';
-                        
-                        // Create the slider
-                        var slider = document.createElement('input');
-                        slider.type = 'range';
-                        slider.min = 0;
-                        slider.max = 100;
-                        slider.value = 70; // Default opacity 0.7
-                        slider.style.width = '100%';
-                        slider.style.height = '5px';
-                        slider.style.margin = '0';
-                        
-                        // Add the slider to its container
-                        sliderContainer.appendChild(slider);
-                        
-                        // Add the slider container to the label
-                        label.appendChild(sliderContainer);
-                        
-                        // Add event listener to the slider
-                        slider.addEventListener('input', function(e) {
-                            // Find the layer by name and update its opacity
-                            var mapLayers = Object.values(window.leafletMap._layers);
-                            for (var i = 0; i < mapLayers.length; i++) {
-                                var layer = mapLayers[i];
-                                // Check if this is the right layer
-                                if (layer.options && layer.options.name === layerName) {
-                                    layer.setOpacity(e.target.value / 100);
-                                    break;
-                                }
-                            }
-                        });
-                    });
-                }, 1000); // Wait 1 second for the layer control to be fully rendered
-            }
-            
-            // Store a reference to the map
-            if (document.readyState === 'complete' || document.readyState === 'interactive') {
-                setTimeout(function() {
-                    window.leafletMap = document.querySelector('.folium-map')._leaflet_map;
-                    addInlineOpacityControls();
-                    
-                    // Add listener for layer control expand/collapse
-                    var layerControl = document.querySelector('.leaflet-control-layers');
-                    if (layerControl) {
-                        layerControl.addEventListener('click', function() {
-                            setTimeout(addInlineOpacityControls, 100);
-                        });
-                    }
-                }, 1000);
-            } else {
-                document.addEventListener('DOMContentLoaded', function() {
-                    setTimeout(function() {
-                        window.leafletMap = document.querySelector('.folium-map')._leaflet_map;
-                        addInlineOpacityControls();
-                        
-                        // Add listener for layer control expand/collapse
-                        var layerControl = document.querySelector('.leaflet-control-layers');
-                        if (layerControl) {
-                            layerControl.addEventListener('click', function() {
-                                setTimeout(addInlineOpacityControls, 100);
-                            });
-                        }
-                    }, 1000);
-                });
-            }
-            </script>
-            
-            <style>
-            /* Style the opacity slider */
-            .inline-opacity-slider input[type=range] {
-                -webkit-appearance: none;
-                background: linear-gradient(to right, rgba(0,0,0,0.1), rgba(0,0,0,1));
-                height: 5px;
-                border-radius: 2px;
-            }
-            
-            .inline-opacity-slider input[type=range]::-webkit-slider-thumb {
-                -webkit-appearance: none;
-                width: 12px;
-                height: 12px;
-                border-radius: 50%;
-                background: #4285f4;
-                cursor: pointer;
-            }
-            
-            .inline-opacity-slider input[type=range]::-moz-range-thumb {
-                width: 12px;
-                height: 12px;
-                border-radius: 50%;
-                background: #4285f4;
-                cursor: pointer;
-            }
-            
-            /* Make the layer control wider to accommodate sliders */
-            .leaflet-control-layers {
-                min-width: 200px;
-            }
-            </style>
-            """
-            
-            # Display the map with custom JS injected
-            components = m.to_streamlit(height=600, add_layer_control=False)
-            
-            # Inject the custom JavaScript
-            st.components.v1.html(custom_js, height=0)
-            
-            # Add explanation for the interactive map
-            st.info("""
-            **Interactive Map Usage:**
-            - Use the layer control in the upper-right to toggle layers on/off
-            - Adjust layer opacity using the slider in the layer control
-            - Switch between Google Satellite and Google Maps base layers
-            - The map shows before classification in green and after classification in red
-            """)
-            
+            if layers_added > 0:
+                st.success(f"Successfully added {layers_added} layers to the map!")
+                
+                # Display the map
+                m.to_streamlit(height=600)
+                
+                # Add usage instructions
+                st.info("""
+                **Map Usage:**
+                - Use the layer control (📋) in the top-right to toggle layers on/off
+                - Green areas show buildings detected in the before image
+                - Red areas show buildings detected in the after image  
+                - Hot colors (red/yellow) show newly detected buildings
+                - Click on base map names to switch between satellite and road views
+                """)
+                
+                # Add download section
+                st.subheader("Download Results")
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    if os.path.exists(before_wgs84_path):
+                        with open(before_wgs84_path, "rb") as file:
+                            st.download_button(
+                                label=f"📥 Download {before_year} Classification",
+                                data=file,
+                                file_name=f"buildings_{before_year}_wgs84.tif",
+                                mime="image/tiff"
+                            )
+                
+                with col2:
+                    if os.path.exists(after_wgs84_path):
+                        with open(after_wgs84_path, "rb") as file:
+                            st.download_button(
+                                label=f"📥 Download {after_year} Classification", 
+                                data=file,
+                                file_name=f"buildings_{after_year}_wgs84.tif",
+                                mime="image/tiff"
+                            )
+                
+                with col3:
+                    if os.path.exists(change_wgs84_path):
+                        with open(change_wgs84_path, "rb") as file:
+                            st.download_button(
+                                label="📥 Download Change Detection",
+                                data=file,
+                                file_name=f"new_buildings_{before_year}_{after_year}_wgs84.tif",
+                                mime="image/tiff"
+                            )
+            else:
+                st.error("No layers could be added to the map. Please check the processing steps.")
+                
         except Exception as e:
             st.error(f"Error creating interactive map: {str(e)}")
             import traceback
             st.error(traceback.format_exc())
     else:
-        st.info("After applying erosion, the interactive map will appear here.")
-
-
-
-
-
-
-
-
-
-
-
+        st.info("Please apply erosion first to see the interactive map.")
