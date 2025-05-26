@@ -1,0 +1,56 @@
+wheel>=0.40.0
+setuptools>=72.1.0
+
+# Data analysis
+numpy==1.26.4
+pandas==2.2.3
+scipy==1.15.2
+matplotlib==3.10.1
+
+# Geospatial
+# GDAL==3.6.2
+shapely==2.1.0
+pyproj==3.7.1
+Fiona==1.9.5
+geopandas==1.0.1
+rasterio==1.4.3
+earthengine-api==1.5.11
+geojson==3.0.1
+
+# Deep learning
+torch==2.6.0
+torchvision==0.21.0
+efficientnet-pytorch==0.7.1
+segmentation-models-pytorch==0.4.0
+timm==1.0.15
+
+# Image processing
+Pillow==11.1.0
+opencv-python==4.11.0.86
+patchify==0.2.3
+
+# Networking
+requests==2.32.3
+urllib3<2.0.0  # Downgraded to be compatible with google-auth
+streamlit==1.44.1
+folium==0.19.5
+streamlit-folium==0.24.1
+geemap==0.35.3
+ipyleaflet==0.19.2
+
+# Utilities
+tqdm==4.67.1
+PyYAML==6.0.2
+filelock==3.18.0
+fsspec==2025.3.2
+
+# Jupyter
+ipykernel==6.29.5
+jupyter==1.1.1
+ipywidgets==8.1.6
+notebook-shim==0.2.4
+
+# Authentication
+google-auth==2.22.0
+google-auth-oauthlib==1.0.0
+# git+https://github.com/cordmaur/GEES2Downloader.git
