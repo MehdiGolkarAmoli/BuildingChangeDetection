@@ -1728,7 +1728,7 @@ with tab4:
         ax2.axis("off")
         st.pyplot(fig)
 
-    # 6) Interactive Map - CORRECTED VERSION
+    # 6) Interactive Map - MODIFIED FOR POSITRON COMPATIBILITY
     if "eroded_result" in st.session_state:
         st.subheader("Interactive Map")
         
@@ -1760,93 +1760,118 @@ with tab4:
             utm_crs = st.session_state.clipped_meta['crs']
             utm_transform = st.session_state.clipped_meta['transform']
             
-            # Create temporary directory
-            temp_dir = tempfile.mkdtemp()
-            st.info(f"Creating temporary files in: {temp_dir}")
+            # Create temporary directory with streamlit's caching mechanism to make it work in Positron
+            @st.cache_resource
+            def create_temp_dir():
+                return tempfile.mkdtemp()
             
-            # Function to create and save georeferenced GeoTIFF
-            def save_georeferenced_tiff(data, filename, crs, transform, dtype='uint8'):
-                """Save numpy array as georeferenced GeoTIFF"""
-                filepath = os.path.join(temp_dir, filename)
+            temp_dir = create_temp_dir()
+            st.info(f"Using temporary directory: {temp_dir}")
+            
+            # Function to create and save georeferenced GeoTIFF with streamlit caching
+            @st.cache_data
+            def save_georeferenced_tiff(_data, _filename, _crs, _transform, _dtype='uint8'):
+                """Save numpy array as georeferenced GeoTIFF with caching"""
+                filepath = os.path.join(temp_dir, _filename)
                 
                 # Ensure data is 2D
-                if len(data.shape) == 3:
-                    data = data.squeeze()
+                if len(_data.shape) == 3:
+                    _data = _data.squeeze()
                 
+                # Use a context manager to ensure file is properly closed
                 with rasterio.open(
                     filepath, 'w',
                     driver='GTiff',
-                    height=data.shape[0],
-                    width=data.shape[1],
+                    height=_data.shape[0],
+                    width=_data.shape[1],
                     count=1,
-                    dtype=dtype,
-                    crs=crs,
-                    transform=transform,
-                    compress='lzw'  # Add compression
+                    dtype=_dtype,
+                    crs=_crs,
+                    transform=_transform,
+                    compress='lzw'
                 ) as dst:
-                    dst.write(data.astype(dtype), 1)
+                    dst.write(_data.astype(_dtype), 1)
                 
-                return filepath
+                # Check file exists and has content
+                if os.path.exists(filepath) and os.path.getsize(filepath) > 0:
+                    return filepath
+                else:
+                    st.error(f"Failed to create file: {filepath}")
+                    return None
             
-            # Function to reproject to WGS84
-            def reproject_to_wgs84(src_path, dst_filename):
-                """Reproject GeoTIFF to WGS84"""
-                dst_path = os.path.join(temp_dir, dst_filename)
+            # Function to reproject to WGS84 with caching
+            @st.cache_data
+            def reproject_to_wgs84(_src_path, _dst_filename):
+                """Reproject GeoTIFF to WGS84 with caching"""
+                if not _src_path or not os.path.exists(_src_path):
+                    return None
+                    
+                dst_path = os.path.join(temp_dir, _dst_filename)
                 
-                with rasterio.open(src_path) as src:
-                    # Calculate target transform and dimensions
-                    dst_transform, dst_width, dst_height = calculate_default_transform(
-                        src.crs, 'EPSG:4326', src.width, src.height, *src.bounds
-                    )
-                    
-                    # Update metadata
-                    dst_kwargs = src.meta.copy()
-                    dst_kwargs.update({
-                        'crs': 'EPSG:4326',
-                        'transform': dst_transform,
-                        'width': dst_width,
-                        'height': dst_height
-                    })
-                    
-                    # Create reprojected file
-                    with rasterio.open(dst_path, 'w', **dst_kwargs) as dst:
-                        reproject(
-                            source=rasterio.band(src, 1),
-                            destination=rasterio.band(dst, 1),
-                            src_transform=src.transform,
-                            src_crs=src.crs,
-                            dst_transform=dst_transform,
-                            dst_crs='EPSG:4326',
-                            resampling=Resampling.nearest
+                try:
+                    with rasterio.open(_src_path) as src:
+                        # Calculate target transform and dimensions
+                        dst_transform, dst_width, dst_height = calculate_default_transform(
+                            src.crs, 'EPSG:4326', src.width, src.height, *src.bounds
                         )
-                
-                return dst_path
+                        
+                        # Update metadata
+                        dst_kwargs = src.meta.copy()
+                        dst_kwargs.update({
+                            'crs': 'EPSG:4326',
+                            'transform': dst_transform,
+                            'width': dst_width,
+                            'height': dst_height
+                        })
+                        
+                        # Create reprojected file
+                        with rasterio.open(dst_path, 'w', **dst_kwargs) as dst:
+                            reproject(
+                                source=rasterio.band(src, 1),
+                                destination=rasterio.band(dst, 1),
+                                src_transform=src.transform,
+                                src_crs=src.crs,
+                                dst_transform=dst_transform,
+                                dst_crs='EPSG:4326',
+                                resampling=Resampling.nearest
+                            )
+                    
+                    if os.path.exists(dst_path) and os.path.getsize(dst_path) > 0:
+                        return dst_path
+                    else:
+                        st.error(f"Failed to create reprojected file: {dst_path}")
+                        return None
+                except Exception as e:
+                    st.error(f"Error in reprojection: {str(e)}")
+                    return None
             
-            # Step 1: Create UTM GeoTIFFs
+            # Step 1: Create UTM GeoTIFFs with unique filenames to avoid cache issues
             st.info("Step 1: Creating UTM GeoTIFFs...")
+            
+            timestamp = int(time.time())
             
             # Save classification results in UTM
             before_utm_path = save_georeferenced_tiff(
-                binary_before, f'before_class_utm_{time.time()}.tif', 
+                binary_before, f'before_class_utm_{timestamp}.tif', 
                 utm_crs, utm_transform, 'uint8'
             )
             
             after_utm_path = save_georeferenced_tiff(
-                binary_after, f'after_class_utm_{time.time()}.tif', 
+                binary_after, f'after_class_utm_{timestamp}.tif', 
                 utm_crs, utm_transform, 'uint8'
             )
             
             change_utm_path = save_georeferenced_tiff(
-                st.session_state.eroded_result, f'change_utm_{time.time()}.tif', 
+                st.session_state.eroded_result, f'change_utm_{timestamp}.tif', 
                 utm_crs, utm_transform, 'uint8'
             )
             
             # Step 2: Reproject to WGS84
             st.info("Step 2: Reprojecting to WGS84...")
             
-            before_wgs84_path = reproject_to_wgs84(before_utm_path, f'before_class_wgs84_{time.time()}.tif')
-            after_wgs84_path = reproject_to_wgs84(after_utm_path, f'after_class_wgs84_{time.time()}.tif')
-            change_wgs84_path = reproject_to_wgs84(change_utm_path, f'change_wgs84_{time.time()}.tif')
+            before_wgs84_path = reproject_to_wgs84(before_utm_path, f'before_class_wgs84_{timestamp}.tif')
+            after_wgs84_path = reproject_to_wgs84(after_utm_path, f'after_class_wgs84_{timestamp}.tif')
+            change_wgs84_path = reproject_to_wgs84(change_utm_path, f'change_wgs84_{timestamp}.tif')
             
             # Step 3: Create Sentinel-2 RGB composites if available
             sentinel_before_wgs84_path = None
@@ -1859,11 +1884,12 @@ with tab4:
                 
                 st.info("Step 3: Creating Sentinel-2 RGB composites...")
                 
-                def create_rgb_composite(sentinel_data, filename):
-                    """Create RGB composite from Sentinel-2 data"""
+                @st.cache_data
+                def create_rgb_composite(_sentinel_data, _filename):
+                    """Create RGB composite from Sentinel-2 data with caching"""
                     # Use bands 4,3,2 (Red, Green, Blue) - 0-indexed: 3,2,1
-                    if sentinel_data.shape[0] >= 4:
-                        rgb_data = sentinel_data[[3,2,1], :, :]  # R,G,B bands
+                    if _sentinel_data.shape[0] >= 4:
+                        rgb_data = _sentinel_data[[3,2,1], :, :]  # R,G,B bands
                         
                         # Normalize each band
                         rgb_normalized = np.zeros_like(rgb_data, dtype=np.uint8)
@@ -1875,7 +1901,7 @@ with tab4:
                             rgb_normalized[i] = band_stretched.astype(np.uint8)
                         
                         # Save as UTM GeoTIFF
-                        utm_path = os.path.join(temp_dir, f'sentinel_utm_{filename}')
+                        utm_path = os.path.join(temp_dir, f'sentinel_utm_{_filename}')
                         with rasterio.open(
                             utm_path, 'w',
                             driver='GTiff',
@@ -1890,7 +1916,7 @@ with tab4:
                             dst.write(rgb_normalized)
                         
                         # Reproject to WGS84
-                        wgs84_path = os.path.join(temp_dir, f'sentinel_wgs84_{filename}')
+                        wgs84_path = os.path.join(temp_dir, f'sentinel_wgs84_{_filename}')
                         with rasterio.open(utm_path) as src:
                             dst_transform, dst_width, dst_height = calculate_default_transform(
                                 src.crs, 'EPSG:4326', src.width, src.height, *src.bounds
@@ -1920,10 +1946,10 @@ with tab4:
                     return None
                 
                 sentinel_before_wgs84_path = create_rgb_composite(
-                    st.session_state.clipped_img, f'{before_year}_{time.time()}.tif'
+                    st.session_state.clipped_img, f'{before_year}_{timestamp}.tif'
                 )
                 sentinel_after_wgs84_path = create_rgb_composite(
-                    st.session_state.clipped_img_2024, f'{after_year}_{time.time()}.tif'
+                    st.session_state.clipped_img_2024, f'{after_year}_{timestamp}.tif'
                 )
             
             # Step 4: Verify files exist and have data
@@ -1962,157 +1988,260 @@ with tab4:
             # Step 5: Create the interactive map
             st.info("Step 5: Creating interactive map...")
             
-            # Create leafmap
-            m = leafmap.Map(
-                center=center,
-                zoom=15,
-                height="600px"
-            )
-            
-            # Add base layers
-            m.add_basemap("SATELLITE")
-            m.add_basemap("ROADMAP")
-            
-            # Add polygon boundary if available
-            if 'region_number' in st.session_state and st.session_state.region_number <= len(st.session_state.drawn_polygons):
+            # Create leafmap - with improved error handling for Positron
+            try:
+                # Create map with explicit dimensions and center
+                m = leafmap.Map(
+                    center=center,
+                    zoom=15,
+                    height="600px",
+                    width="100%",
+                    search_control=False,  # Simplify to avoid potential issues
+                    draw_control=False,    # Simplify to avoid potential issues
+                    measure_control=False  # Simplify to avoid potential issues
+                )
+                
+                # Add base layers explicitly
+                m.add_basemap("ROADMAP")  # Google Road Map
+                m.add_basemap("SATELLITE")  # Google Satellite
+                m.add_basemap("TERRAIN")   # Google Terrain
+                
+                # CRITICAL FIX: Make absolute paths for raster files
+                # This helps leafmap find the files in Positron environment
+                abs_before_wgs84_path = os.path.abspath(before_wgs84_path) if before_wgs84_path else None
+                abs_after_wgs84_path = os.path.abspath(after_wgs84_path) if after_wgs84_path else None
+                abs_change_wgs84_path = os.path.abspath(change_wgs84_path) if change_wgs84_path else None
+                abs_sentinel_before_path = os.path.abspath(sentinel_before_wgs84_path) if sentinel_before_wgs84_path else None
+                abs_sentinel_after_path = os.path.abspath(sentinel_after_wgs84_path) if sentinel_after_wgs84_path else None
+                
+                # Debug info about file paths
+                st.write("File paths for map layers:")
+                st.write(f"Before classification: {abs_before_wgs84_path}")
+                st.write(f"After classification: {abs_after_wgs84_path}")
+                st.write(f"Change detection: {abs_change_wgs84_path}")
+                
+                # Add polygon boundary if available
+                if 'region_number' in st.session_state and st.session_state.region_number <= len(st.session_state.drawn_polygons):
+                    try:
+                        # Create GeoDataFrame
+                        gdf = gpd.GeoDataFrame(geometry=[selected_polygon], crs="EPSG:4326")
+                        
+                        # Save GeoJSON to a file for leafmap to read
+                        geojson_path = os.path.join(temp_dir, f"region_{timestamp}.geojson")
+                        gdf.to_file(geojson_path, driver="GeoJSON")
+                        
+                        # Add from file
+                        m.add_geojson(
+                            geojson_path,
+                            layer_name="Selected Region",
+                            style={'color': 'yellow', 'fillColor': 'transparent', 'weight': 3}
+                        )
+                    except Exception as e:
+                        st.warning(f"Could not add region boundary: {str(e)}")
+                        m.add_marker(location=center, popup="Region Center")
+                
+                # MODIFIED: Use alternative method to add rasters for Positron compatibility
+                layers_added = 0
+                
+                # Try the normal add_raster first for each layer
                 try:
-                    # Create GeoDataFrame
-                    gdf = gpd.GeoDataFrame(geometry=[selected_polygon], crs="EPSG:4326")
-                    geojson_data = json.loads(gdf.to_json())
+                    # Add Sentinel-2 layers first (background)
+                    if abs_sentinel_before_path and os.path.exists(abs_sentinel_before_path):
+                        m.add_raster(
+                            abs_sentinel_before_path,
+                            layer_name=f"Sentinel-2 Before ({before_year})",
+                            opacity=0.8
+                        )
+                        layers_added += 1
+                        st.success(f"✅ Added Sentinel-2 Before layer")
                     
-                    m.add_geojson(
-                        geojson_data,
-                        layer_name="Selected Region",
-                        style={'color': 'yellow', 'fillColor': 'transparent', 'weight': 3}
-                    )
+                    if abs_sentinel_after_path and os.path.exists(abs_sentinel_after_path):
+                        m.add_raster(
+                            abs_sentinel_after_path,
+                            layer_name=f"Sentinel-2 After ({after_year})",
+                            opacity=0.8
+                        )
+                        layers_added += 1
+                        st.success(f"✅ Added Sentinel-2 After layer")
+                    
+                    # Add classification layers
+                    if abs_before_wgs84_path and os.path.exists(abs_before_wgs84_path):
+                        m.add_raster(
+                            abs_before_wgs84_path,
+                            layer_name=f"Buildings Before ({before_year})",
+                            opacity=0.7,
+                            colormap="Greens"
+                        )
+                        layers_added += 1
+                        st.success(f"✅ Added Before Classification layer")
+                    
+                    if abs_after_wgs84_path and os.path.exists(abs_after_wgs84_path):
+                        m.add_raster(
+                            abs_after_wgs84_path,
+                            layer_name=f"Buildings After ({after_year})",
+                            opacity=0.7,
+                            colormap="Reds"
+                        )
+                        layers_added += 1
+                        st.success(f"✅ Added After Classification layer")
+                    
+                    # Add change detection layer
+                    if abs_change_wgs84_path and os.path.exists(abs_change_wgs84_path):
+                        m.add_raster(
+                            abs_change_wgs84_path,
+                            layer_name=f"New Buildings ({before_year}-{after_year})",
+                            opacity=0.8,
+                            colormap="hot"
+                        )
+                        layers_added += 1
+                        st.success(f"✅ Added Change Detection layer")
+                    
                 except Exception as e:
-                    st.warning(f"Could not add region boundary: {str(e)}")
-                    m.add_marker(location=center, popup="Region Center")
-            
-            # Add raster layers with proper error handling
-            layers_added = 0
-            
-            # Add Sentinel-2 layers first (background)
-            if sentinel_before_wgs84_path and os.path.exists(sentinel_before_wgs84_path):
-                try:
-                    m.add_raster(
-                        sentinel_before_wgs84_path,
-                        layer_name=f"Sentinel-2 Before ({before_year})",
-                        opacity=0.8
-                    )
-                    layers_added += 1
-                    st.success(f"✅ Added Sentinel-2 Before layer")
-                except Exception as e:
-                    st.warning(f"Could not add Sentinel-2 Before layer: {str(e)}")
-            
-            if sentinel_after_wgs84_path and os.path.exists(sentinel_after_wgs84_path):
-                try:
-                    m.add_raster(
-                        sentinel_after_wgs84_path,
-                        layer_name=f"Sentinel-2 After ({after_year})",
-                        opacity=0.8
-                    )
-                    layers_added += 1
-                    st.success(f"✅ Added Sentinel-2 After layer")
-                except Exception as e:
-                    st.warning(f"Could not add Sentinel-2 After layer: {str(e)}")
-            
-            # Add classification layers
-            try:
-                m.add_raster(
-                    before_wgs84_path,
-                    layer_name=f"Buildings Before ({before_year})",
-                    opacity=0.7,
-                    colormap="Greens"
-                )
-                layers_added += 1
-                st.success(f"✅ Added Before Classification layer")
+                    st.warning(f"Standard add_raster method failed: {str(e)}. Trying alternative method...")
+                    
+                    # If standard method fails, try the alternative COG method
+                    # This is a workaround for Positron file access limitations
+                    if layers_added == 0:
+                        try:
+                            # Alternative method: convert to COGs first
+                            import rasterio.shutil
+                            
+                            def convert_to_cog(input_path, output_name):
+                                """Convert GeoTIFF to Cloud Optimized GeoTIFF"""
+                                if not input_path or not os.path.exists(input_path):
+                                    return None
+                                    
+                                output_path = os.path.join(temp_dir, output_name)
+                                rasterio.shutil.copy(input_path, output_path, driver='COG')
+                                return output_path
+                            
+                            # Convert files to COGs
+                            cog_files = {}
+                            
+                            if abs_before_wgs84_path and os.path.exists(abs_before_wgs84_path):
+                                cog_path = convert_to_cog(abs_before_wgs84_path, f"cog_before_{timestamp}.tif")
+                                if cog_path:
+                                    cog_files[f"Buildings Before ({before_year})"] = cog_path
+                            
+                            if abs_after_wgs84_path and os.path.exists(abs_after_wgs84_path):
+                                cog_path = convert_to_cog(abs_after_wgs84_path, f"cog_after_{timestamp}.tif")
+                                if cog_path:
+                                    cog_files[f"Buildings After ({after_year})"] = cog_path
+                            
+                            if abs_change_wgs84_path and os.path.exists(abs_change_wgs84_path):
+                                cog_path = convert_to_cog(abs_change_wgs84_path, f"cog_change_{timestamp}.tif")
+                                if cog_path:
+                                    cog_files[f"New Buildings ({before_year}-{after_year})"] = cog_path
+                            
+                            # Add COGs to map
+                            for name, path in cog_files.items():
+                                m.add_cog_layer(path, name=name)
+                                layers_added += 1
+                                st.success(f"✅ Added {name} layer (COG)")
+                                
+                        except Exception as e2:
+                            st.error(f"Alternative COG method failed: {str(e2)}")
+                
+                # Add layer control
+                m.add_layer_control()
+                
+                if layers_added > 0:
+                    st.success(f"Successfully added {layers_added} layers to the map!")
+                    
+                    # Display the map
+                    try:
+                        m.to_streamlit(height=600)
+                    except Exception as e:
+                        st.error(f"Error displaying map: {str(e)}")
+                        
+                        # Try fallback to HTML
+                        try:
+                            html_content = m.to_html()
+                            st.components.v1.html(html_content, height=600)
+                            st.success("Map displayed using HTML fallback method")
+                        except Exception as e2:
+                            st.error(f"HTML fallback failed: {str(e2)}")
+                    
+                    # Add usage instructions
+                    st.info("""
+                    **Map Usage:**
+                    - Use the layer control (📋) in the top-right to toggle layers on/off
+                    - Green areas show buildings detected in the before image
+                    - Red areas show buildings detected in the after image  
+                    - Hot colors (red/yellow) show newly detected buildings
+                    - Click on base map names to switch between satellite and road views
+                    """)
+                    
+                    # Add download section
+                    st.subheader("Download Results")
+                    col1, col2, col3 = st.columns(3)
+                    
+                    with col1:
+                        if abs_before_wgs84_path and os.path.exists(abs_before_wgs84_path):
+                            with open(abs_before_wgs84_path, "rb") as file:
+                                st.download_button(
+                                    label=f"📥 Download {before_year} Classification",
+                                    data=file,
+                                    file_name=f"buildings_{before_year}_wgs84.tif",
+                                    mime="image/tiff"
+                                )
+                    
+                    with col2:
+                        if abs_after_wgs84_path and os.path.exists(abs_after_wgs84_path):
+                            with open(abs_after_wgs84_path, "rb") as file:
+                                st.download_button(
+                                    label=f"📥 Download {after_year} Classification", 
+                                    data=file,
+                                    file_name=f"buildings_{after_year}_wgs84.tif",
+                                    mime="image/tiff"
+                                )
+                    
+                    with col3:
+                        if abs_change_wgs84_path and os.path.exists(abs_change_wgs84_path):
+                            with open(abs_change_wgs84_path, "rb") as file:
+                                st.download_button(
+                                    label="📥 Download Change Detection",
+                                    data=file,
+                                    file_name=f"new_buildings_{before_year}_{after_year}_wgs84.tif",
+                                    mime="image/tiff"
+                                )
+                else:
+                    st.error("No layers could be added to the map. Please check the processing steps.")
+                    
+                    # Debug information for troubleshooting
+                    st.subheader("Debug Information")
+                    st.write("Environment information:")
+                    st.write(f"Temp directory exists: {os.path.exists(temp_dir)}")
+                    st.write(f"Temp directory contents: {os.listdir(temp_dir)}")
+                    
+                    for path in [abs_before_wgs84_path, abs_after_wgs84_path, abs_change_wgs84_path]:
+                        if path and os.path.exists(path):
+                            try:
+                                with rasterio.open(path) as src:
+                                    st.write(f"File {os.path.basename(path)}: {src.width}x{src.height}, {src.count} bands, CRS: {src.crs}")
+                            except Exception as e:
+                                st.write(f"File {os.path.basename(path)}: Error reading - {str(e)}")
+                        elif path:
+                            st.write(f"File {os.path.basename(path)}: Does not exist")
+                    
+                    # Display static fallback map
+                    st.warning("Displaying static map as fallback")
+                    static_map_fig, static_map_ax = plt.subplots(figsize=(10, 10))
+                    static_map_ax.imshow(binary_before, cmap='Greens', alpha=0.5)
+                    static_map_ax.imshow(binary_after, cmap='Reds', alpha=0.5)
+                    static_map_ax.imshow(st.session_state.eroded_result, cmap='hot', alpha=0.7)
+                    static_map_ax.set_title(f"Building Changes {before_year}-{after_year}")
+                    static_map_ax.axis('off')
+                    st.pyplot(static_map_fig)
+                
             except Exception as e:
-                st.warning(f"Could not add Before Classification layer: {str(e)}")
-            
-            try:
-                m.add_raster(
-                    after_wgs84_path,
-                    layer_name=f"Buildings After ({after_year})",
-                    opacity=0.7,
-                    colormap="Reds"
-                )
-                layers_added += 1
-                st.success(f"✅ Added After Classification layer")
-            except Exception as e:
-                st.warning(f"Could not add After Classification layer: {str(e)}")
-            
-            # Add change detection layer
-            try:
-                m.add_raster(
-                    change_wgs84_path,
-                    layer_name=f"New Buildings ({before_year}-{after_year})",
-                    opacity=0.8,
-                    colormap="hot"
-                )
-                layers_added += 1
-                st.success(f"✅ Added Change Detection layer")
-            except Exception as e:
-                st.warning(f"Could not add Change Detection layer: {str(e)}")
-            
-            # Add layer control
-            m.add_layer_control()
-            
-            if layers_added > 0:
-                st.success(f"Successfully added {layers_added} layers to the map!")
-                
-                # Display the map
-                m.to_streamlit(height=600)
-                
-                # Add usage instructions
-                st.info("""
-                **Map Usage:**
-                - Use the layer control (📋) in the top-right to toggle layers on/off
-                - Green areas show buildings detected in the before image
-                - Red areas show buildings detected in the after image  
-                - Hot colors (red/yellow) show newly detected buildings
-                - Click on base map names to switch between satellite and road views
-                """)
-                
-                # Add download section
-                st.subheader("Download Results")
-                col1, col2, col3 = st.columns(3)
-                
-                with col1:
-                    if os.path.exists(before_wgs84_path):
-                        with open(before_wgs84_path, "rb") as file:
-                            st.download_button(
-                                label=f"📥 Download {before_year} Classification",
-                                data=file,
-                                file_name=f"buildings_{before_year}_wgs84.tif",
-                                mime="image/tiff"
-                            )
-                
-                with col2:
-                    if os.path.exists(after_wgs84_path):
-                        with open(after_wgs84_path, "rb") as file:
-                            st.download_button(
-                                label=f"📥 Download {after_year} Classification", 
-                                data=file,
-                                file_name=f"buildings_{after_year}_wgs84.tif",
-                                mime="image/tiff"
-                            )
-                
-                with col3:
-                    if os.path.exists(change_wgs84_path):
-                        with open(change_wgs84_path, "rb") as file:
-                            st.download_button(
-                                label="📥 Download Change Detection",
-                                data=file,
-                                file_name=f"new_buildings_{before_year}_{after_year}_wgs84.tif",
-                                mime="image/tiff"
-                            )
-            else:
-                st.error("No layers could be added to the map. Please check the processing steps.")
-                
+                st.error(f"Error creating interactive map: {str(e)}")
+                import traceback
+                st.error(traceback.format_exc())
         except Exception as e:
-            st.error(f"Error creating interactive map: {str(e)}")
+            st.error(f"Error processing data: {str(e)}")
             import traceback
             st.error(traceback.format_exc())
     else:
         st.info("Please apply erosion first to see the interactive map.")
+   
