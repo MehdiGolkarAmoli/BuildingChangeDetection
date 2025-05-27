@@ -1662,7 +1662,8 @@ with tab4:
     import leafmap.foliumap as leafmap
     import json
     import geopandas as gpd
-    import uuid  # Added for generating unique identifiers
+    import base64
+    from io import BytesIO
 
     # 1) Retrieve the processed classification arrays
     before_year = st.session_state.get("before_year", "2021")
@@ -1729,7 +1730,7 @@ with tab4:
         ax2.axis("off")
         st.pyplot(fig)
 
-    # 6) Interactive Map - DIRECT FILE HANDLING VERSION
+    # 6) Interactive Map - FIXED VERSION FOR LEAFMAP VERSION COMPATIBILITY
     if "eroded_result" in st.session_state:
         st.subheader("Interactive Map")
         
@@ -1761,553 +1762,376 @@ with tab4:
             utm_crs = st.session_state.clipped_meta['crs']
             utm_transform = st.session_state.clipped_meta['transform']
             
-            # Create unique temporary directory each time
-            temp_dir = tempfile.mkdtemp()
-            st.info(f"Using temporary directory: {temp_dir}")
+            # Function to convert numpy array to base64 PNG with specified colormap
+            def array_to_base64(array, colormap='viridis', alpha=1.0):
+                """Convert numpy array to base64 encoded PNG with specified colormap"""
+                # Create figure without borders
+                fig, ax = plt.subplots(figsize=(10, 10))
+                
+                # Plot the array with the specified colormap
+                im = ax.imshow(array, cmap=colormap, alpha=alpha)
+                
+                # Remove axes and whitespace
+                ax.axis('off')
+                plt.tight_layout(pad=0)
+                
+                # Save to BytesIO buffer
+                buf = BytesIO()
+                fig.savefig(buf, format='png', bbox_inches='tight', pad_inches=0, 
+                           transparent=True, dpi=150)
+                plt.close(fig)
+                
+                # Encode as base64
+                buf.seek(0)
+                img_str = base64.b64encode(buf.read()).decode('utf-8')
+                return f"data:image/png;base64,{img_str}"
             
-            # Generate unique identifiers for each file
-            before_id = str(uuid.uuid4())[:8]
-            after_id = str(uuid.uuid4())[:8]
-            change_id = str(uuid.uuid4())[:8]
-            
-            # Modified function to save GeoTIFF - completely direct, no caching
-            def save_direct_geotiff(data, filepath, crs, transform, dtype='uint8', add_noise=False):
-                """Save array directly to GeoTIFF with optional noise to ensure uniqueness"""
-                # Make a copy to avoid modifying original data
-                data_copy = data.copy()
-                
-                # Add minimal random noise if requested (to make files detectably different)
-                if add_noise and data.max() > 0:
-                    # Create a noise mask that only affects a small number of pixels (0.1%)
-                    noise_mask = np.random.random(data.shape) > 0.999
-                    # Only add noise to non-zero pixels
-                    valid_pixels = (data > 0) & noise_mask
-                    if valid_pixels.any():
-                        data_copy[valid_pixels] = np.maximum(1, data_copy[valid_pixels] - 1)
-                
-                # Ensure data is 2D
-                if len(data_copy.shape) == 3:
-                    data_copy = data_copy.squeeze()
-                
-                # Create the directory if it doesn't exist
-                os.makedirs(os.path.dirname(filepath), exist_ok=True)
-                
-                # Save the file
-                with rasterio.open(
-                    filepath,
-                    'w',
-                    driver='GTiff',
-                    height=data_copy.shape[0],
-                    width=data_copy.shape[1],
-                    count=1,
-                    dtype=dtype,
-                    crs=crs,
-                    transform=transform,
-                    compress='lzw'
-                ) as dst:
-                    dst.write(data_copy.astype(dtype), 1)
-                
-                # Verify file was created
-                if os.path.exists(filepath):
-                    file_size = os.path.getsize(filepath)
-                    st.success(f"Created {os.path.basename(filepath)}: {file_size} bytes")
+            # Function to convert Sentinel-2 data to base64 PNG
+            def sentinel_to_base64(sentinel_data):
+                """Convert Sentinel-2 data to RGB base64 image"""
+                if sentinel_data.shape[0] >= 4:
+                    # Extract RGB bands (4,3,2 -> R,G,B)
+                    rgb_data = sentinel_data[[3,2,1], :, :].copy()
                     
-                    # Read back the first few bytes to confirm it's a valid file
-                    with open(filepath, 'rb') as f:
-                        header = f.read(16)
-                        st.write(f"File header: {header.hex()[:20]}...")
+                    # Normalize each band
+                    rgb_normalized = np.zeros((3, rgb_data.shape[1], rgb_data.shape[2]), dtype=np.uint8)
+                    for i in range(3):
+                        band = rgb_data[i]
+                        # Contrast stretch
+                        p2, p98 = np.percentile(band, (2, 98))
+                        if p98 > p2:  # Avoid division by zero
+                            band_stretched = np.clip((band - p2) / (p98 - p2) * 255, 0, 255)
+                        else:
+                            band_stretched = np.zeros_like(band)
+                        rgb_normalized[i] = band_stretched.astype(np.uint8)
                     
-                    return filepath
-                else:
-                    st.error(f"Failed to create file: {filepath}")
-                    return None
+                    # Convert to RGB for PIL
+                    rgb_array = np.transpose(rgb_normalized, (1, 2, 0))
+                    
+                    # Create PIL Image
+                    img = Image.fromarray(rgb_array)
+                    
+                    # Save to BytesIO buffer
+                    buf = BytesIO()
+                    img.save(buf, format='PNG')
+                    
+                    # Encode as base64
+                    buf.seek(0)
+                    img_str = base64.b64encode(buf.read()).decode('utf-8')
+                    return f"data:image/png;base64,{img_str}"
+                return None
             
-            # Function to directly reproject GeoTIFF to WGS84
-            def direct_reproject_to_wgs84(src_path, dst_path):
-                """Reproject GeoTIFF to WGS84 directly"""
-                if not os.path.exists(src_path):
-                    st.error(f"Source file does not exist: {src_path}")
-                    return None
+            # Calculate bounds from the geospatial metadata
+            bounds = rasterio.transform.array_bounds(
+                binary_before.shape[0], binary_before.shape[1], utm_transform
+            )
+            
+            # Transform bounds from UTM to WGS84 (lat/lon)
+            from pyproj import Transformer
+            
+            def transform_bounds(bounds, src_crs, dst_crs='EPSG:4326'):
+                """Transform bounds from source CRS to destination CRS"""
+                transformer = Transformer.from_crs(src_crs, dst_crs, always_xy=True)
                 
+                # bounds format: (left, bottom, right, top)
+                # Transform bottom-left corner
+                lon1, lat1 = transformer.transform(bounds[0], bounds[1])
+                # Transform top-right corner
+                lon2, lat2 = transformer.transform(bounds[2], bounds[3])
+                
+                return (lon1, lat1, lon2, lat2)
+            
+            # Transform bounds to WGS84
+            wgs84_bounds = transform_bounds(bounds, utm_crs)
+            
+            # Convert to leaflet bounds format [[south, west], [north, east]]
+            img_bounds = [[wgs84_bounds[1], wgs84_bounds[0]], [wgs84_bounds[3], wgs84_bounds[2]]]
+            
+            st.write("Image bounds for overlay:", img_bounds)
+            
+            # Create the map
+            m = leafmap.Map(
+                center=center,
+                zoom=15,
+                height="600px",
+                width="100%"
+            )
+            
+            # Add base layers
+            m.add_basemap("ROADMAP")  # Google Road Map
+            m.add_basemap("SATELLITE")  # Google Satellite
+            
+            # Add polygon boundary if available
+            if 'region_number' in st.session_state and st.session_state.region_number <= len(st.session_state.drawn_polygons):
                 try:
-                    # Read source file
-                    with rasterio.open(src_path) as src:
-                        # Calculate target transform
-                        dst_transform, dst_width, dst_height = calculate_default_transform(
-                            src.crs, 'EPSG:4326', src.width, src.height, *src.bounds
-                        )
-                        
-                        # Update metadata
-                        dst_kwargs = src.meta.copy()
-                        dst_kwargs.update({
-                            'crs': 'EPSG:4326',
-                            'transform': dst_transform,
-                            'width': dst_width,
-                            'height': dst_height,
-                            'compress': 'lzw'
-                        })
-                        
-                        # Create reprojected file
-                        with rasterio.open(dst_path, 'w', **dst_kwargs) as dst:
-                            reproject(
-                                source=rasterio.band(src, 1),
-                                destination=rasterio.band(dst, 1),
-                                src_transform=src.transform,
-                                src_crs=src.crs,
-                                dst_transform=dst_transform,
-                                dst_crs='EPSG:4326',
-                                resampling=Resampling.nearest
-                            )
+                    # Create GeoDataFrame
+                    gdf = gpd.GeoDataFrame(geometry=[selected_polygon], crs="EPSG:4326")
                     
-                    # Verify file was created
-                    if os.path.exists(dst_path):
-                        file_size = os.path.getsize(dst_path)
-                        st.success(f"Reprojected {os.path.basename(dst_path)}: {file_size} bytes")
-                        return dst_path
-                    else:
-                        st.error(f"Failed to create reprojected file: {dst_path}")
-                        return None
+                    # Convert to GeoJSON
+                    geojson_data = json.loads(gdf.to_json())
                     
+                    # Add to map
+                    m.add_geojson(
+                        geojson_data,
+                        layer_name="Selected Region",
+                        style={'color': 'yellow', 'fillColor': 'transparent', 'weight': 3}
+                    )
                 except Exception as e:
-                    st.error(f"Error in reprojection: {str(e)}")
-                    import traceback
-                    st.error(traceback.format_exc())
-                    return None
+                    st.warning(f"Could not add region boundary: {str(e)}")
+                    m.add_marker(location=center, popup="Region Center")
             
-            # Step 1: Create UTM GeoTIFFs with guaranteed unique content
-            st.info("Step 1: Creating UTM GeoTIFFs...")
+            # Add Sentinel-2 images if available
+            layers_added = 0
             
-            # Create paths with unique IDs
-            before_utm_path = os.path.join(temp_dir, f'before_utm_{before_id}.tif')
-            after_utm_path = os.path.join(temp_dir, f'after_utm_{after_id}.tif')
-            change_utm_path = os.path.join(temp_dir, f'change_utm_{change_id}.tif')
+            # Try to get leafmap version to adapt to API differences
+            try:
+                import pkg_resources
+                leafmap_version = pkg_resources.get_distribution("leafmap").version
+                st.info(f"Detected leafmap version: {leafmap_version}")
+            except:
+                leafmap_version = "unknown"
+                st.info("Could not determine leafmap version")
             
-            # Save files directly - add noise to ensure they're unique
-            save_direct_geotiff(binary_before, before_utm_path, utm_crs, utm_transform, add_noise=False)
-            save_direct_geotiff(binary_after, after_utm_path, utm_crs, utm_transform, add_noise=True)
-            save_direct_geotiff(st.session_state.eroded_result, change_utm_path, utm_crs, utm_transform, add_noise=True)
-            
-            # Step 2: Reproject to WGS84 directly
-            st.info("Step 2: Reprojecting to WGS84...")
-            
-            # Create WGS84 paths with unique IDs
-            before_wgs84_path = os.path.join(temp_dir, f'before_wgs84_{before_id}.tif')
-            after_wgs84_path = os.path.join(temp_dir, f'after_wgs84_{after_id}.tif')
-            change_wgs84_path = os.path.join(temp_dir, f'change_wgs84_{change_id}.tif')
-            
-            # Directly reproject each file
-            direct_reproject_to_wgs84(before_utm_path, before_wgs84_path)
-            direct_reproject_to_wgs84(after_utm_path, after_wgs84_path)
-            direct_reproject_to_wgs84(change_utm_path, change_wgs84_path)
-            
-            # Step 3: Create Sentinel-2 RGB composites if available
-            sentinel_before_wgs84_path = None
-            sentinel_after_wgs84_path = None
-            
+            # Check if we have Sentinel-2 data
             if ('clipped_img' in st.session_state and 
                 'clipped_img_2024' in st.session_state and
                 st.session_state.clipped_img is not None and
                 st.session_state.clipped_img_2024 is not None):
                 
-                st.info("Step 3: Creating Sentinel-2 RGB composites...")
+                st.info("Adding Sentinel-2 images...")
                 
-                def create_direct_rgb_composite(sentinel_data, prefix):
-                    """Create RGB composite from Sentinel-2 data directly"""
-                    # Use bands 4,3,2 (Red, Green, Blue) - 0-indexed: 3,2,1
-                    if sentinel_data.shape[0] >= 4:
-                        rgb_data = sentinel_data[[3,2,1], :, :]  # R,G,B bands
-                        
-                        # Normalize each band
-                        rgb_normalized = np.zeros_like(rgb_data, dtype=np.uint8)
-                        for i in range(3):
-                            band = rgb_data[i]
-                            # Contrast stretch
-                            p2, p98 = np.percentile(band, (2, 98))
-                            if p98 > p2:  # Avoid division by zero
-                                band_stretched = np.clip((band - p2) / (p98 - p2) * 255, 0, 255)
-                            else:
-                                band_stretched = np.zeros_like(band)
-                            rgb_normalized[i] = band_stretched.astype(np.uint8)
-                        
-                        # Generate unique ID for this sentinel composite
-                        sentinel_id = str(uuid.uuid4())[:8]
-                        
-                        # Save as UTM GeoTIFF
-                        utm_path = os.path.join(temp_dir, f'sentinel_utm_{prefix}_{sentinel_id}.tif')
-                        
-                        with rasterio.open(
-                            utm_path, 'w',
-                            driver='GTiff',
-                            height=rgb_normalized.shape[1],
-                            width=rgb_normalized.shape[2],
-                            count=3,
-                            dtype='uint8',
-                            crs=utm_crs,
-                            transform=utm_transform,
-                            compress='lzw'
-                        ) as dst:
-                            dst.write(rgb_normalized)
-                        
-                        # Define WGS84 path
-                        wgs84_path = os.path.join(temp_dir, f'sentinel_wgs84_{prefix}_{sentinel_id}.tif')
-                        
-                        # Reproject to WGS84
-                        with rasterio.open(utm_path) as src:
-                            dst_transform, dst_width, dst_height = calculate_default_transform(
-                                src.crs, 'EPSG:4326', src.width, src.height, *src.bounds
+                # Convert Sentinel-2 images to base64
+                sentinel_before_base64 = sentinel_to_base64(st.session_state.clipped_img)
+                sentinel_after_base64 = sentinel_to_base64(st.session_state.clipped_img_2024)
+                
+                # Try different API approaches based on leafmap version
+                if sentinel_before_base64:
+                    try:
+                        # First try with folium's image_overlay directly
+                        import folium
+                        folium.raster_layers.ImageOverlay(
+                            sentinel_before_base64,
+                            bounds=img_bounds,
+                            name=f"Sentinel-2 Before ({before_year})",
+                            opacity=0.8
+                        ).add_to(m)
+                        layers_added += 1
+                        st.success(f"✅ Added Sentinel-2 Before ({before_year})")
+                    except Exception as e1:
+                        st.warning(f"Folium direct overlay failed: {str(e1)}")
+                        try:
+                            # Try leafmap's image_overlay with minimal parameters
+                            m.image_overlay(
+                                url=sentinel_before_base64,
+                                bounds=img_bounds,
+                                name=f"Sentinel-2 Before ({before_year})"
                             )
-                            
-                            dst_kwargs = src.meta.copy()
-                            dst_kwargs.update({
-                                'crs': 'EPSG:4326',
-                                'transform': dst_transform,
-                                'width': dst_width,
-                                'height': dst_height,
-                                'compress': 'lzw'
-                            })
-                            
-                            with rasterio.open(wgs84_path, 'w', **dst_kwargs) as dst:
-                                for i in range(1, 4):  # 3 RGB bands
-                                    reproject(
-                                        source=rasterio.band(src, i),
-                                        destination=rasterio.band(dst, i),
-                                        src_transform=src.transform,
-                                        src_crs=src.crs,
-                                        dst_transform=dst_transform,
-                                        dst_crs='EPSG:4326',
-                                        resampling=Resampling.bilinear
-                                    )
-                        
-                        if os.path.exists(wgs84_path):
-                            st.success(f"Created Sentinel-2 composite: {os.path.basename(wgs84_path)}")
-                            return wgs84_path
-                        else:
-                            st.error(f"Failed to create Sentinel-2 composite")
-                            return None
-                    return None
-                
-                # Create composites with unique prefixes
-                sentinel_before_wgs84_path = create_direct_rgb_composite(
-                    st.session_state.clipped_img, f'before_{before_year}'
-                )
-                sentinel_after_wgs84_path = create_direct_rgb_composite(
-                    st.session_state.clipped_img_2024, f'after_{after_year}'
-                )
-            
-            # Step 4: Verify files exist and have data
-            st.info("Step 4: Verifying created files...")
-            
-            files_to_check = [
-                (before_wgs84_path, f"Before Classification ({before_year})"),
-                (after_wgs84_path, f"After Classification ({after_year})"),
-                (change_wgs84_path, "Change Detection Mask")
-            ]
-            
-            if sentinel_before_wgs84_path:
-                files_to_check.append((sentinel_before_wgs84_path, f"Sentinel-2 Before ({before_year})"))
-            if sentinel_after_wgs84_path:
-                files_to_check.append((sentinel_after_wgs84_path, f"Sentinel-2 After ({after_year})"))
-            
-            valid_files = []
-            for filepath, name in files_to_check:
-                if os.path.exists(filepath):
-                    try:
-                        with rasterio.open(filepath) as src:
-                            if src.count > 0 and src.width > 0 and src.height > 0:
-                                valid_files.append((filepath, name))
-                                st.success(f"✅ {name}: {src.width}x{src.height}, {src.count} bands")
-                                
-                                # Calculate checksum of first band to verify uniqueness
-                                band_data = src.read(1)
-                                checksum = np.sum(band_data)
-                                st.write(f"   Checksum: {checksum}")
-                            else:
-                                st.warning(f"⚠️ {name}: Invalid dimensions")
-                    except Exception as e:
-                        st.error(f"❌ {name}: Error reading file - {str(e)}")
-                else:
-                    st.warning(f"⚠️ {name}: File not found at {filepath}")
-            
-            if len(valid_files) == 0:
-                st.error("No valid files created. Cannot display map.")
-                st.stop()
-            
-            # Debug: Check if files are actually different
-            st.subheader("File Uniqueness Check")
-            st.info("Comparing file contents to ensure they're unique")
-            
-            file_checksums = {}
-            for filepath, name in valid_files:
-                try:
-                    with rasterio.open(filepath) as src:
-                        # Read first band and calculate checksum
-                        band_data = src.read(1)
-                        checksum = np.sum(band_data)
-                        file_checksums[name] = checksum
-                except Exception as e:
-                    st.error(f"Error reading {name}: {str(e)}")
-            
-            # Display checksums
-            for name, checksum in file_checksums.items():
-                st.write(f"{name}: Checksum {checksum}")
-            
-            # Check for duplicate checksums
-            if len(set(file_checksums.values())) < len(file_checksums):
-                st.warning("⚠️ Duplicate file contents detected! Files may not be unique.")
-                
-                # Identify duplicates
-                seen = {}
-                for name, checksum in file_checksums.items():
-                    if checksum in seen:
-                        st.error(f"'{name}' has the same content as '{seen[checksum]}'")
-                    else:
-                        seen[checksum] = name
-            else:
-                st.success("✅ All files have unique content!")
-            
-            # Step 5: Create the interactive map
-            st.info("Step 5: Creating interactive map...")
-            
-            # Debug: Show actual file paths being used
-            st.write("File paths for map layers:")
-            st.write(f"Before classification: {before_wgs84_path}")
-            st.write(f"After classification: {after_wgs84_path}")
-            st.write(f"Change detection: {change_wgs84_path}")
-            
-            # Create leafmap with explicit error handling
-            try:
-                # Create map with explicit dimensions and center
-                m = leafmap.Map(
-                    center=center,
-                    zoom=15,
-                    height="600px",
-                    width="100%"
-                )
-                
-                # Add base layers explicitly
-                m.add_basemap("ROADMAP")  # Google Road Map
-                m.add_basemap("SATELLITE")  # Google Satellite
-                
-                # Add polygon boundary if available
-                if 'region_number' in st.session_state and st.session_state.region_number <= len(st.session_state.drawn_polygons):
-                    try:
-                        # Create GeoDataFrame
-                        gdf = gpd.GeoDataFrame(geometry=[selected_polygon], crs="EPSG:4326")
-                        
-                        # Save GeoJSON to a file
-                        geojson_id = str(uuid.uuid4())[:8]
-                        geojson_path = os.path.join(temp_dir, f"region_{geojson_id}.geojson")
-                        gdf.to_file(geojson_path, driver="GeoJSON")
-                        
-                        # Add from file
-                        m.add_geojson(
-                            geojson_path,
-                            layer_name="Selected Region",
-                            style={'color': 'yellow', 'fillColor': 'transparent', 'weight': 3}
-                        )
-                    except Exception as e:
-                        st.warning(f"Could not add region boundary: {str(e)}")
-                        m.add_marker(location=center, popup="Region Center")
-                
-                # Add raster layers with explicit error handling
-                layers_added = 0
-                
-                # Try to add each layer and track success/failure
-                layer_results = []
-                
-                # Add Sentinel-2 layers first (background)
-                if sentinel_before_wgs84_path and os.path.exists(sentinel_before_wgs84_path):
-                    try:
-                        m.add_raster(
-                            sentinel_before_wgs84_path,
-                            layer_name=f"Sentinel-2 Before ({before_year})",
-                            opacity=0.8
-                        )
-                        layers_added += 1
-                        layer_results.append(f"✅ Added Sentinel-2 Before ({before_year})")
-                    except Exception as e:
-                        layer_results.append(f"❌ Failed to add Sentinel-2 Before: {str(e)}")
-                
-                if sentinel_after_wgs84_path and os.path.exists(sentinel_after_wgs84_path):
-                    try:
-                        m.add_raster(
-                            sentinel_after_wgs84_path,
-                            layer_name=f"Sentinel-2 After ({after_year})",
-                            opacity=0.8
-                        )
-                        layers_added += 1
-                        layer_results.append(f"✅ Added Sentinel-2 After ({after_year})")
-                    except Exception as e:
-                        layer_results.append(f"❌ Failed to add Sentinel-2 After: {str(e)}")
-                
-                # Add classification layers
-                try:
-                    m.add_raster(
-                        before_wgs84_path,
-                        layer_name=f"Buildings Before ({before_year})",
-                        opacity=0.7,
-                        colormap="Greens"
-                    )
-                    layers_added += 1
-                    layer_results.append(f"✅ Added Before Classification layer")
-                except Exception as e:
-                    layer_results.append(f"❌ Failed to add Before Classification: {str(e)}")
-                
-                try:
-                    m.add_raster(
-                        after_wgs84_path,
-                        layer_name=f"Buildings After ({after_year})",
-                        opacity=0.7,
-                        colormap="Reds"
-                    )
-                    layers_added += 1
-                    layer_results.append(f"✅ Added After Classification layer")
-                except Exception as e:
-                    layer_results.append(f"❌ Failed to add After Classification: {str(e)}")
-                
-                # Add change detection layer
-                try:
-                    m.add_raster(
-                        change_wgs84_path,
-                        layer_name=f"New Buildings ({before_year}-{after_year})",
-                        opacity=0.8,
-                        colormap="hot"
-                    )
-                    layers_added += 1
-                    layer_results.append(f"✅ Added Change Detection layer")
-                except Exception as e:
-                    layer_results.append(f"❌ Failed to add Change Detection: {str(e)}")
-                
-                # Display layer results
-                for result in layer_results:
-                    st.write(result)
-                
-                # Add layer control
-                m.add_layer_control()
-                
-                if layers_added > 0:
-                    st.success(f"Successfully added {layers_added} layers to the map!")
-                    
-                    # Try alternative methods if any layers failed
-                    if layers_added < len(files_to_check):
-                        st.warning("Some layers could not be added. Trying alternative method...")
-                        
-                        # Try loading files using a URL-like approach
-                        try:
-                            for filepath, name in valid_files:
-                                if "Before Classification" in name:
-                                    m.add_raster(
-                                        f"file://{filepath}",  # Try file:// protocol
-                                        layer_name=f"{name} (alt)",
-                                        opacity=0.7,
-                                        colormap="Greens"
-                                    )
-                                    st.success(f"Added {name} with alternative method")
-                        except Exception as e:
-                            st.error(f"Alternative method failed: {str(e)}")
-                    
-                    # Display the map
-                    try:
-                        m.to_streamlit(height=600)
-                        st.success("Map displayed successfully")
-                    except Exception as e:
-                        st.error(f"Error displaying map: {str(e)}")
-                        
-                        # Try fallback to HTML
-                        try:
-                            html_content = m.to_html()
-                            st.components.v1.html(html_content, height=600)
-                            st.success("Map displayed using HTML fallback method")
+                            layers_added += 1
+                            st.success(f"✅ Added Sentinel-2 Before ({before_year})")
                         except Exception as e2:
-                            st.error(f"HTML fallback failed: {str(e2)}")
-                            
-                            # Final fallback: static map
-                            st.warning("Displaying static map as fallback")
-                            static_map_fig, static_map_ax = plt.subplots(figsize=(10, 10))
-                            static_map_ax.imshow(binary_before, cmap='Greens', alpha=0.5)
-                            static_map_ax.imshow(binary_after, cmap='Reds', alpha=0.5)
-                            static_map_ax.imshow(st.session_state.eroded_result, cmap='hot', alpha=0.7)
-                            static_map_ax.set_title(f"Building Changes {before_year}-{after_year}")
-                            static_map_ax.axis('off')
-                            st.pyplot(static_map_fig)
-                    
-                    # Add usage instructions
-                    st.info("""
-                    **Map Usage:**
-                    - Use the layer control (📋) in the top-right to toggle layers on/off
-                    - Green areas show buildings detected in the before image
-                    - Red areas show buildings detected in the after image  
-                    - Hot colors (red/yellow) show newly detected buildings
-                    - Click on base map names to switch between satellite and road views
-                    """)
-                    
-                    # Add download section
-                    st.subheader("Download Results")
-                    col1, col2, col3 = st.columns(3)
-                    
-                    with col1:
-                        if os.path.exists(before_wgs84_path):
-                            with open(before_wgs84_path, "rb") as file:
-                                st.download_button(
-                                    label=f"📥 Download {before_year} Classification",
-                                    data=file,
-                                    file_name=f"buildings_{before_year}_wgs84.tif",
-                                    mime="image/tiff"
-                                )
-                    
-                    with col2:
-                        if os.path.exists(after_wgs84_path):
-                            with open(after_wgs84_path, "rb") as file:
-                                st.download_button(
-                                    label=f"📥 Download {after_year} Classification", 
-                                    data=file,
-                                    file_name=f"buildings_{after_year}_wgs84.tif",
-                                    mime="image/tiff"
-                                )
-                    
-                    with col3:
-                        if os.path.exists(change_wgs84_path):
-                            with open(change_wgs84_path, "rb") as file:
-                                st.download_button(
-                                    label="📥 Download Change Detection",
-                                    data=file,
-                                    file_name=f"new_buildings_{before_year}_{after_year}_wgs84.tif",
-                                    mime="image/tiff"
-                                )
-                else:
-                    st.error("No layers could be added to the map. Please check the processing steps.")
-                    
-                    # Debug information for troubleshooting
-                    st.subheader("Debug Information")
-                    st.write("Environment information:")
-                    st.write(f"Temp directory exists: {os.path.exists(temp_dir)}")
-                    st.write(f"Temp directory contents: {os.listdir(temp_dir) if os.path.exists(temp_dir) else 'N/A'}")
-                    
-                    # Check if files are actually readable by rasterio
-                    st.write("File readability check:")
-                    for filepath, name in valid_files:
+                            st.warning(f"Leafmap image_overlay failed: {str(e2)}")
+                
+                if sentinel_after_base64:
+                    try:
+                        # First try with folium's image_overlay directly
+                        import folium
+                        folium.raster_layers.ImageOverlay(
+                            sentinel_after_base64,
+                            bounds=img_bounds,
+                            name=f"Sentinel-2 After ({after_year})",
+                            opacity=0.8
+                        ).add_to(m)
+                        layers_added += 1
+                        st.success(f"✅ Added Sentinel-2 After ({after_year})")
+                    except Exception as e1:
+                        st.warning(f"Folium direct overlay failed: {str(e1)}")
                         try:
-                            with rasterio.open(filepath) as src:
-                                st.write(f"{name}: OK - {src.width}x{src.height}, {src.count} bands, CRS: {src.crs}")
-                                st.write(f"   Bounds: {src.bounds}")
-                                st.write(f"   Transform: {src.transform}")
-                        except Exception as e:
-                            st.write(f"{name}: Error - {str(e)}")
-                    
-                    # Display static fallback map
-                    st.warning("Displaying static map as fallback")
-                    static_map_fig, static_map_ax = plt.subplots(figsize=(10, 10))
-                    static_map_ax.imshow(binary_before, cmap='Greens', alpha=0.5)
-                    static_map_ax.imshow(binary_after, cmap='Reds', alpha=0.5)
-                    static_map_ax.imshow(st.session_state.eroded_result, cmap='hot', alpha=0.7)
-                    static_map_ax.set_title(f"Building Changes {before_year}-{after_year}")
-                    static_map_ax.axis('off')
-                    st.pyplot(static_map_fig)
+                            # Try leafmap's image_overlay with minimal parameters
+                            m.image_overlay(
+                                url=sentinel_after_base64,
+                                bounds=img_bounds,
+                                name=f"Sentinel-2 After ({after_year})"
+                            )
+                            layers_added += 1
+                            st.success(f"✅ Added Sentinel-2 After ({after_year})")
+                        except Exception as e2:
+                            st.warning(f"Leafmap image_overlay failed: {str(e2)}")
+            
+            # Add classification layers as image overlays - USING DIRECT FOLIUM METHOD
+            # Let's try using folium directly since we know the leafmap API is problematic
+            try:
+                import folium
+                
+                # Before classification
+                before_base64 = array_to_base64(binary_before, 'Greens', alpha=0.7)
+                folium.raster_layers.ImageOverlay(
+                    before_base64,
+                    bounds=img_bounds,
+                    name=f"Buildings Before ({before_year})",
+                    opacity=0.7
+                ).add_to(m)
+                layers_added += 1
+                st.success(f"✅ Added Before Classification layer")
+                
+                # After classification
+                after_base64 = array_to_base64(binary_after, 'Reds', alpha=0.7)
+                folium.raster_layers.ImageOverlay(
+                    after_base64,
+                    bounds=img_bounds,
+                    name=f"Buildings After ({after_year})",
+                    opacity=0.7
+                ).add_to(m)
+                layers_added += 1
+                st.success(f"✅ Added After Classification layer")
+                
+                # Change detection
+                change_base64 = array_to_base64(st.session_state.eroded_result, 'hot', alpha=0.8)
+                folium.raster_layers.ImageOverlay(
+                    change_base64,
+                    bounds=img_bounds,
+                    name=f"New Buildings ({before_year}-{after_year})",
+                    opacity=0.8
+                ).add_to(m)
+                layers_added += 1
+                st.success(f"✅ Added Change Detection layer")
                 
             except Exception as e:
-                st.error(f"Error creating interactive map: {str(e)}")
-                import traceback
-                st.error(traceback.format_exc())
+                st.error(f"Direct folium method failed: {str(e)}")
+                
+                # Fallback to simplified leafmap method
+                try:
+                    # Before classification
+                    before_base64 = array_to_base64(binary_before, 'Greens', alpha=0.7)
+                    m.image_overlay(
+                        url=before_base64,
+                        bounds=img_bounds,
+                        name=f"Buildings Before ({before_year})"
+                    )
+                    layers_added += 1
+                    st.success(f"✅ Added Before Classification layer")
+                    
+                    # After classification
+                    after_base64 = array_to_base64(binary_after, 'Reds', alpha=0.7)
+                    m.image_overlay(
+                        url=after_base64,
+                        bounds=img_bounds,
+                        name=f"Buildings After ({after_year})"
+                    )
+                    layers_added += 1
+                    st.success(f"✅ Added After Classification layer")
+                    
+                    # Change detection
+                    change_base64 = array_to_base64(st.session_state.eroded_result, 'hot', alpha=0.8)
+                    m.image_overlay(
+                        url=change_base64,
+                        bounds=img_bounds,
+                        name=f"New Buildings ({before_year}-{after_year})"
+                    )
+                    layers_added += 1
+                    st.success(f"✅ Added Change Detection layer")
+                except Exception as e2:
+                    st.error(f"Simplified leafmap method failed: {str(e2)}")
+            
+            # Add layer control
+            m.add_layer_control()
+            
+            if layers_added > 0:
+                st.success(f"Successfully added {layers_added} layers to the map!")
+                
+                # Display the map
+                try:
+                    m.to_streamlit(height=600)
+                    st.success("Map displayed successfully!")
+                except Exception as e:
+                    st.error(f"Error displaying map: {str(e)}")
+                    
+                    # Try fallback to HTML
+                    try:
+                        html_content = m.to_html()
+                        st.components.v1.html(html_content, height=600)
+                        st.success("Map displayed using HTML fallback method")
+                    except Exception as e2:
+                        st.error(f"HTML fallback failed: {str(e2)}")
+                
+                # Add usage instructions
+                st.info("""
+                **Map Usage:**
+                - Use the layer control (📋) in the top-right to toggle layers on/off
+                - Green areas show buildings detected in the before image
+                - Red areas show buildings detected in the after image  
+                - Hot colors (red/yellow) show newly detected buildings
+                - Click on base map names to switch between satellite and road views
+                """)
+                
+                # Add download section - create GeoTIFFs for download
+                st.subheader("Download Results")
+                
+                # Create temporary directory for downloads
+                download_dir = tempfile.mkdtemp()
+                
+                # Function to save array as GeoTIFF for download
+                def save_geotiff_for_download(data, filename, crs, transform):
+                    filepath = os.path.join(download_dir, filename)
+                    with rasterio.open(
+                        filepath, 'w',
+                        driver='GTiff',
+                        height=data.shape[0],
+                        width=data.shape[1],
+                        count=1,
+                        dtype='uint8',
+                        crs=crs,
+                        transform=transform,
+                        compress='lzw'
+                    ) as dst:
+                        dst.write(data.astype('uint8'), 1)
+                    return filepath
+                
+                # Save GeoTIFFs for download
+                before_download = save_geotiff_for_download(
+                    binary_before, f"buildings_{before_year}.tif", utm_crs, utm_transform
+                )
+                after_download = save_geotiff_for_download(
+                    binary_after, f"buildings_{after_year}.tif", utm_crs, utm_transform
+                )
+                change_download = save_geotiff_for_download(
+                    st.session_state.eroded_result, f"new_buildings_{before_year}_{after_year}.tif", 
+                    utm_crs, utm_transform
+                )
+                
+                # Create download buttons
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    if os.path.exists(before_download):
+                        with open(before_download, "rb") as file:
+                            st.download_button(
+                                label=f"📥 Download {before_year} Classification",
+                                data=file,
+                                file_name=f"buildings_{before_year}.tif",
+                                mime="image/tiff"
+                            )
+                
+                with col2:
+                    if os.path.exists(after_download):
+                        with open(after_download, "rb") as file:
+                            st.download_button(
+                                label=f"📥 Download {after_year} Classification", 
+                                data=file,
+                                file_name=f"buildings_{after_year}.tif",
+                                mime="image/tiff"
+                            )
+                
+                with col3:
+                    if os.path.exists(change_download):
+                        with open(change_download, "rb") as file:
+                            st.download_button(
+                                label="📥 Download Change Detection",
+                                data=file,
+                                file_name=f"new_buildings_{before_year}_{after_year}.tif",
+                                mime="image/tiff"
+                            )
+            else:
+                st.error("No layers could be added to the map.")
                 
                 # Fallback to static visualization
                 st.warning("Displaying static visualization as fallback")
@@ -2320,8 +2144,19 @@ with tab4:
                 st.pyplot(static_fig)
                 
         except Exception as e:
-            st.error(f"Error processing data: {str(e)}")
+            st.error(f"Error creating interactive map: {str(e)}")
             import traceback
             st.error(traceback.format_exc())
+            
+            # Fallback to static visualization
+            st.warning("Displaying static visualization due to error")
+            static_fig, static_ax = plt.subplots(figsize=(10, 10))
+            static_ax.imshow(binary_before, cmap='Greens', alpha=0.5)
+            static_ax.imshow(binary_after, cmap='Reds', alpha=0.5)
+            static_ax.imshow(st.session_state.eroded_result, cmap='hot', alpha=0.7)
+            static_ax.set_title(f"Building Changes {before_year}-{after_year}")
+            static_ax.axis('off')
+            st.pyplot(static_fig)
     else:
         st.info("Please apply erosion first to see the interactive map.")
+    
