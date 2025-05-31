@@ -361,7 +361,7 @@ else:
     st.stop()
 
 # Create tabs for different pages
-tab1, tab2, tab3, tab4  = st.tabs(["Region Selection", "Before Image Analysis", "After Image Analysis", "Change Detection"])
+tab1, tab2, tab3,   = st.tabs(["Region Selection", "Before Image Analysis", "After Image Analysis", "Change Detection"])
 
 # Global variables
 if 'drawn_polygons' not in st.session_state:
@@ -2130,24 +2130,16 @@ with tab4:
                 control=True
             ).add_to(m)
             
-            # Add None/White background option - Create pure white tiles
-            white_tile = folium.TileLayer(
-                tiles='',
+            # Add None/White background option - Create a simple white tile layer
+            # Create a 1x1 white pixel as base64
+            white_pixel = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg=="
+            folium.TileLayer(
+                tiles=f"data:image/png;base64,{white_pixel}",
                 name='None',
                 overlay=False,
                 control=True,
-                attr='No background'
-            )
-            # Override the tile URL to show nothing
-            white_tile._template = folium.Template("""
-                {%- macro script(this, kwargs) %}
-                    var {{ this.get_name() }} = L.tileLayer(
-                        '',
-                        {{ this.options|tojson }}
-                    ).addTo({{ this._parent.get_name() }});
-                {%- endmacro %}
-            """)
-            white_tile.add_to(m)
+                attr='White background'
+            ).add_to(m)
             
             # Add data layers
             layer_names = []
