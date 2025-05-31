@@ -1688,7 +1688,8 @@ import matplotlib.pyplot as plt # Ensure matplotlib is imported
 # For demonstration, a simple placeholder:
 def apply_erosion(mask, kernel_size_val):
     # Replace with your actual cv2.erode or skimage.morphology.erosion implementation
-    # This is just a placeholder to make the code runnable    st.warning(f"apply_erosion function called with kernel_size {kernel_size_val}. Implement actual erosion.")
+    # This is just a placeholder to make the code runnable  
+    st.warning(f"apply_erosion function called with kernel_size {kernel_size_val}. Implement actual erosion.")
     return mask # Placeholder returns original mask
 
 
@@ -1776,7 +1777,8 @@ if "eroded_result" in st.session_state:
             'clipped_meta' in st.session_state
         )        if 'clipped_meta' in st.session_state:
             utm_transform = st.session_state.clipped_meta['transform']
-            utm_crs = st.session_state.clipped_meta['crs']            utm_height = st.session_state.clipped_img.shape[1]
+            utm_crs = st.session_state.clipped_meta['crs']           
+        utm_height = st.session_state.clipped_img.shape[1]
             utm_width = st.session_state.clipped_img.shape[2]
             if selected_polygon:
                 bounds = selected_polygon.bounds
@@ -1789,7 +1791,8 @@ if "eroded_result" in st.session_state:
                 bounds = None
             utm_crs = None
             utm_transform = None
-            utm_height = binary_before.shape[0]            utm_width = binary_before.shape[1]
+            utm_height = binary_before.shape[0]           
+            utm_width = binary_before.shape[1]
 
         before_class_wgs84_path = None
         after_class_wgs84_path = None
@@ -1813,7 +1816,8 @@ if "eroded_result" in st.session_state:
             ) as dst:
                 dst.write(binary_before, 1)
 
-            before_class_wgs84_path = os.path.join(temp_dir, f"before_class_wgs84_{before_year}_{time.time()}.tif")            with rasterio.open(before_class_utm_path) as src:
+            before_class_wgs84_path = os.path.join(temp_dir, f"before_class_wgs84_{before_year}_{time.time()}.tif")         
+            with rasterio.open(before_class_utm_path) as src:
                 dst_transform_calc, dst_width_calc, dst_height_calc = calculate_default_transform(
                     src.crs, dst_crs, src.width, src.height, *src.bounds)
                 target_transform = dst_transform_calc
@@ -1873,7 +1877,8 @@ if "eroded_result" in st.session_state:
                     with rasterio.open(change_mask_wgs84_path, 'w', **dst_kwargs) as dst:
                         reproject(
                             source=rasterio.band(src, 1), destination=rasterio.band(dst, 1),
-                            src_transform=src.transform, src_crs=src.crs,                            dst_transform=target_transform, dst_crs=dst_crs,
+                            src_transform=src.transform, src_crs=src.crs,                       
+                            dst_transform=target_transform, dst_crs=dst_crs,
                             resampling=Resampling.nearest
                         )
 
@@ -1891,7 +1896,8 @@ if "eroded_result" in st.session_state:
                 with rasterio.open(before_sentinel_utm_path) as src:
                     dst_kwargs = src.meta.copy()
                     dst_kwargs.update({
-                        'crs': 'EPSG:4326', 'transform': target_transform,                        'width': target_width, 'height': target_height
+                        'crs': 'EPSG:4326', 'transform': target_transform,                    
+                        'width': target_width, 'height': target_height
                     })
                     with rasterio.open(before_sentinel_wgs84_path, 'w', **dst_kwargs) as dst:
                         for i in range(1, 5):
@@ -1939,11 +1945,13 @@ if "eroded_result" in st.session_state:
                                 rgb_data[i] = np.clip((band_data - min_val) / (max_val - min_val) * 255, 0, 255).astype(np.uint8)
                             else:
                                 rgb_data[i] = np.zeros_like(band_data, dtype=np.uint8)
-                        dst.write(rgb_data)                after_rgb_wgs84_path = os.path.join(temp_dir, f"after_rgb_wgs84_{after_year}_{time.time()}.tif")
+                        dst.write(rgb_data)            
+                        after_rgb_wgs84_path = os.path.join(temp_dir, f"after_rgb_wgs84_{after_year}_{time.time()}.tif")
                 with rasterio.open(after_sentinel_wgs84_path) as src:
                     profile = src.profile.copy()
                     profile.update(count=3, dtype='uint8')
-                    with rasterio.open(after_rgb_wgs84_path, 'w', **profile) as dst:                        rgb_data = np.zeros((3, src.height, src.width), dtype=np.uint8)
+                    with rasterio.open(after_rgb_wgs84_path, 'w', **profile) as dst:                  
+                        rgb_data = np.zeros((3, src.height, src.width), dtype=np.uint8)
                         for i, band_idx in enumerate([3, 2, 1]):
                             band_data = src.read(band_idx)
                             min_val = np.percentile(band_data[band_data > 0], 2) if np.any(band_data > 0) else 0
