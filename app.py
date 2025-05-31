@@ -1656,7 +1656,8 @@ with tab4:
     import time
     import rasterio
     from rasterio.warp import calculate_default_transform, reproject, Resampling
-    from shapely.geometry import mapping
+    from rasterio.mask import mask
+    from shapely.geometry import mapping, box
     import io
     from PIL import Image
     import folium  # Changed to folium
@@ -1796,146 +1797,9 @@ with tab4:
             target_width = None
             target_height = None
             target_transform = None
+            target_bounds = None
             
-            # Process and save Sentinel-2 images first to determine target resolution
-            if has_sentinel_data:
-                # Save Sentinel-2 images (first 4 bands) as GeoTIFF files
-                before_sentinel_utm_path = os.path.join(temp_dir, f"before_sentinel_utm_{before_year}_{time.time()}.tif")
-                
-                # Get the first 4 bands (B, G, R, NIR)
-                before_bands = st.session_state.clipped_img[:4, :, :]
-                
-                with rasterio.open(
-                    before_sentinel_utm_path, 'w',
-                    driver='GTiff',
-                    height=before_bands.shape[1],
-                    width=before_bands.shape[2],
-                    count=4,  # 4 bands
-                    dtype=before_bands.dtype,
-                    crs=utm_crs,
-                    transform=utm_transform
-                ) as dst:
-                    for i in range(4):
-                        dst.write(before_bands[i], i+1)
-                
-                # Reproject Sentinel-2 before image to WGS84
-                before_sentinel_wgs84_path = os.path.join(temp_dir, f"before_sentinel_wgs84_{before_year}_{time.time()}.tif")
-                with rasterio.open(before_sentinel_utm_path) as src:
-                    # Calculate the ideal dimensions and transformation parameters
-                    dst_transform, dst_width, dst_height = calculate_default_transform(
-                        src.crs, 'EPSG:4326', src.width, src.height, *src.bounds)
-                    
-                    # Store these values for consistent reprojection of all layers
-                    target_transform = dst_transform
-                    target_width = dst_width
-                    target_height = dst_height
-                    
-                    # Calculate resolution
-                    target_resolution_x = (src.bounds.right - src.bounds.left) / dst_width
-                    target_resolution_y = (src.bounds.top - src.bounds.bottom) / dst_height
-                    
-                    # Create the WGS84 version
-                    dst_kwargs = src.meta.copy()
-                    dst_kwargs.update({
-                        'crs': 'EPSG:4326',
-                        'transform': dst_transform,
-                        'width': dst_width,
-                        'height': dst_height
-                    })
-                    
-                    with rasterio.open(before_sentinel_wgs84_path, 'w', **dst_kwargs) as dst:
-                        for i in range(1, 5):  # 4 bands
-                            reproject(
-                                source=rasterio.band(src, i),
-                                destination=rasterio.band(dst, i),
-                                src_transform=src.transform,
-                                src_crs=src.crs,
-                                dst_transform=dst_transform,
-                                dst_crs='EPSG:4326',
-                                resampling=Resampling.nearest
-                            )
-                
-                # Save Sentinel-2 after image (first 4 bands) as GeoTIFF
-                after_sentinel_utm_path = os.path.join(temp_dir, f"after_sentinel_utm_{after_year}_{time.time()}.tif")
-                
-                # Get the first 4 bands (B, G, R, NIR)
-                after_bands = st.session_state.clipped_img_2024[:4, :, :]
-                
-                with rasterio.open(
-                    after_sentinel_utm_path, 'w',
-                    driver='GTiff',
-                    height=after_bands.shape[1],
-                    width=after_bands.shape[2],
-                    count=4,  # 4 bands
-                    dtype=after_bands.dtype,
-                    crs=utm_crs,
-                    transform=utm_transform
-                ) as dst:
-                    for i in range(4):
-                        dst.write(after_bands[i], i+1)
-                
-                # Reproject Sentinel-2 after image to WGS84
-                after_sentinel_wgs84_path = os.path.join(temp_dir, f"after_sentinel_wgs84_{after_year}_{time.time()}.tif")
-                with rasterio.open(after_sentinel_utm_path) as src:
-                    # Use the same dimensions and transform as the before image for consistency
-                    dst_kwargs = src.meta.copy()
-                    dst_kwargs.update({
-                        'crs': 'EPSG:4326',
-                        'transform': target_transform,
-                        'width': target_width,
-                        'height': target_height
-                    })
-                    
-                    with rasterio.open(after_sentinel_wgs84_path, 'w', **dst_kwargs) as dst:
-                        for i in range(1, 5):  # 4 bands
-                            reproject(
-                                source=rasterio.band(src, i),
-                                destination=rasterio.band(dst, i),
-                                src_transform=src.transform,
-                                src_crs=src.crs,
-                                dst_transform=target_transform,
-                                dst_crs='EPSG:4326',
-                                resampling=Resampling.nearest
-                            )
-                
-                # Create RGB GeoTIFFs for folium display
-                before_rgb_wgs84_path = os.path.join(temp_dir, f"before_rgb_wgs84_{before_year}_{time.time()}.tif")
-                with rasterio.open(before_sentinel_wgs84_path) as src:
-                    profile = src.profile.copy()
-                    profile.update(count=3, dtype='uint8')  # RGB has 3 bands, ensure uint8
-                    with rasterio.open(before_rgb_wgs84_path, 'w', **profile) as dst:
-                        # Use bands 3,2,1 (R,G,B) from the 4-band image
-                        rgb_data = np.zeros((3, src.height, src.width), dtype=np.uint8)
-                        for i, band_idx in enumerate([3, 2, 1]):  # R,G,B bands
-                            band_data = src.read(band_idx)
-                            # Simple contrast stretch
-                            min_val = np.percentile(band_data, 2)
-                            max_val = np.percentile(band_data, 98)
-                            if max_val > min_val:
-                                rgb_data[i] = np.clip((band_data - min_val) / (max_val - min_val) * 255, 0, 255).astype(np.uint8)
-                            else:
-                                rgb_data[i] = np.zeros_like(band_data, dtype=np.uint8)
-                        dst.write(rgb_data)
-                
-                after_rgb_wgs84_path = os.path.join(temp_dir, f"after_rgb_wgs84_{after_year}_{time.time()}.tif")
-                with rasterio.open(after_sentinel_wgs84_path) as src:
-                    profile = src.profile.copy()
-                    profile.update(count=3, dtype='uint8')  # RGB has 3 bands, ensure uint8
-                    with rasterio.open(after_rgb_wgs84_path, 'w', **profile) as dst:
-                        # Use bands 3,2,1 (R,G,B) from the 4-band image
-                        rgb_data = np.zeros((3, src.height, src.width), dtype=np.uint8)
-                        for i, band_idx in enumerate([3, 2, 1]):  # R,G,B bands
-                            band_data = src.read(band_idx)
-                            # Simple contrast stretch
-                            min_val = np.percentile(band_data, 2)
-                            max_val = np.percentile(band_data, 98)
-                            if max_val > min_val:
-                                rgb_data[i] = np.clip((band_data - min_val) / (max_val - min_val) * 255, 0, 255).astype(np.uint8)
-                            else:
-                                rgb_data[i] = np.zeros_like(band_data, dtype=np.uint8)
-                        dst.write(rgb_data)
-            
-            # Create properly georeferenced GeoTIFFs for classification results
+            # First, save and reproject classification masks to establish the reference bounds
             if utm_crs is not None and utm_transform is not None:
                 # Define WGS84 as target CRS
                 dst_crs = 'EPSG:4326'  # WGS84
@@ -1954,18 +1818,17 @@ with tab4:
                 ) as dst:
                     dst.write(binary_before, 1)
                 
-                # Reproject to WGS84
+                # Reproject to WGS84 and get the bounds
                 before_class_wgs84_path = os.path.join(temp_dir, f"before_class_wgs84_{before_year}_{time.time()}.tif")
                 with rasterio.open(before_class_utm_path) as src:
-                    # Use the same target dimensions and transform as the Sentinel-2 images if available
-                    if target_transform is not None:
-                        dst_transform = target_transform
-                        dst_width = target_width
-                        dst_height = target_height
-                    else:
-                        # Calculate the ideal dimensions and transformation parameters
-                        dst_transform, dst_width, dst_height = calculate_default_transform(
-                            src.crs, dst_crs, src.width, src.height, *src.bounds)
+                    # Calculate the ideal dimensions and transformation parameters
+                    dst_transform, dst_width, dst_height = calculate_default_transform(
+                        src.crs, dst_crs, src.width, src.height, *src.bounds)
+                    
+                    # Store these values for consistent reprojection of all layers
+                    target_transform = dst_transform
+                    target_width = dst_width
+                    target_height = dst_height
                     
                     # Create the WGS84 version
                     dst_kwargs = src.meta.copy()
@@ -1986,6 +1849,8 @@ with tab4:
                             dst_crs=dst_crs,
                             resampling=Resampling.nearest
                         )
+                        # Get the bounds of the reprojected classification
+                        target_bounds = dst.bounds
                 
                 # Save after classification as georeferenced GeoTIFF in UTM
                 after_class_utm_path = os.path.join(temp_dir, f"after_class_utm_{after_year}_{time.time()}.tif")
@@ -2004,23 +1869,13 @@ with tab4:
                 # Reproject to WGS84
                 after_class_wgs84_path = os.path.join(temp_dir, f"after_class_wgs84_{after_year}_{time.time()}.tif")
                 with rasterio.open(after_class_utm_path) as src:
-                    # Use the same target dimensions and transform as the Sentinel-2 images if available
-                    if target_transform is not None:
-                        dst_transform = target_transform
-                        dst_width = target_width
-                        dst_height = target_height
-                    else:
-                        # Calculate the ideal dimensions and transformation parameters
-                        dst_transform, dst_width, dst_height = calculate_default_transform(
-                            src.crs, dst_crs, src.width, src.height, *src.bounds)
-                    
-                    # Create the WGS84 version
+                    # Use the same target dimensions and transform
                     dst_kwargs = src.meta.copy()
                     dst_kwargs.update({
                         'crs': dst_crs,
-                        'transform': dst_transform,
-                        'width': dst_width,
-                        'height': dst_height
+                        'transform': target_transform,
+                        'width': target_width,
+                        'height': target_height
                     })
                     
                     with rasterio.open(after_class_wgs84_path, 'w', **dst_kwargs) as dst:
@@ -2029,7 +1884,7 @@ with tab4:
                             destination=rasterio.band(dst, 1),
                             src_transform=src.transform,
                             src_crs=src.crs,
-                            dst_transform=dst_transform,
+                            dst_transform=target_transform,
                             dst_crs=dst_crs,
                             resampling=Resampling.nearest
                         )
@@ -2052,23 +1907,13 @@ with tab4:
                     # Reproject to WGS84
                     change_mask_wgs84_path = os.path.join(temp_dir, f"change_mask_wgs84_{time.time()}.tif")
                     with rasterio.open(change_mask_utm_path) as src:
-                        # Use the same target dimensions and transform as the Sentinel-2 images if available
-                        if target_transform is not None:
-                            dst_transform = target_transform
-                            dst_width = target_width
-                            dst_height = target_height
-                        else:
-                            # Calculate the ideal dimensions and transformation parameters
-                            dst_transform, dst_width, dst_height = calculate_default_transform(
-                                src.crs, dst_crs, src.width, src.height, *src.bounds)
-                        
-                        # Create the WGS84 version
+                        # Use the same target dimensions and transform
                         dst_kwargs = src.meta.copy()
                         dst_kwargs.update({
                             'crs': dst_crs,
-                            'transform': dst_transform,
-                            'width': dst_width,
-                            'height': dst_height
+                            'transform': target_transform,
+                            'width': target_width,
+                            'height': target_height
                         })
                         
                         with rasterio.open(change_mask_wgs84_path, 'w', **dst_kwargs) as dst:
@@ -2077,10 +1922,135 @@ with tab4:
                                 destination=rasterio.band(dst, 1),
                                 src_transform=src.transform,
                                 src_crs=src.crs,
-                                dst_transform=dst_transform,
+                                dst_transform=target_transform,
                                 dst_crs=dst_crs,
                                 resampling=Resampling.nearest
                             )
+                
+                # Process and save Sentinel-2 images, clipping to classification bounds
+                if has_sentinel_data and target_bounds is not None:
+                    # Save Sentinel-2 images (first 4 bands) as GeoTIFF files
+                    before_sentinel_utm_path = os.path.join(temp_dir, f"before_sentinel_utm_{before_year}_{time.time()}.tif")
+                    
+                    # Get the first 4 bands (B, G, R, NIR)
+                    before_bands = st.session_state.clipped_img[:4, :, :]
+                    
+                    with rasterio.open(
+                        before_sentinel_utm_path, 'w',
+                        driver='GTiff',
+                        height=before_bands.shape[1],
+                        width=before_bands.shape[2],
+                        count=4,  # 4 bands
+                        dtype=before_bands.dtype,
+                        crs=utm_crs,
+                        transform=utm_transform
+                    ) as dst:
+                        for i in range(4):
+                            dst.write(before_bands[i], i+1)
+                    
+                    # Reproject and clip Sentinel-2 before image to match classification bounds
+                    before_sentinel_wgs84_path = os.path.join(temp_dir, f"before_sentinel_wgs84_{before_year}_{time.time()}.tif")
+                    with rasterio.open(before_sentinel_utm_path) as src:
+                        # Create the WGS84 version with same bounds as classification
+                        dst_kwargs = src.meta.copy()
+                        dst_kwargs.update({
+                            'crs': 'EPSG:4326',
+                            'transform': target_transform,
+                            'width': target_width,
+                            'height': target_height
+                        })
+                        
+                        with rasterio.open(before_sentinel_wgs84_path, 'w', **dst_kwargs) as dst:
+                            for i in range(1, 5):  # 4 bands
+                                reproject(
+                                    source=rasterio.band(src, i),
+                                    destination=rasterio.band(dst, i),
+                                    src_transform=src.transform,
+                                    src_crs=src.crs,
+                                    dst_transform=target_transform,
+                                    dst_crs='EPSG:4326',
+                                    resampling=Resampling.bilinear  # Use bilinear for smoother imagery
+                                )
+                    
+                    # Save Sentinel-2 after image (first 4 bands) as GeoTIFF
+                    after_sentinel_utm_path = os.path.join(temp_dir, f"after_sentinel_utm_{after_year}_{time.time()}.tif")
+                    
+                    # Get the first 4 bands (B, G, R, NIR)
+                    after_bands = st.session_state.clipped_img_2024[:4, :, :]
+                    
+                    with rasterio.open(
+                        after_sentinel_utm_path, 'w',
+                        driver='GTiff',
+                        height=after_bands.shape[1],
+                        width=after_bands.shape[2],
+                        count=4,  # 4 bands
+                        dtype=after_bands.dtype,
+                        crs=utm_crs,
+                        transform=utm_transform
+                    ) as dst:
+                        for i in range(4):
+                            dst.write(after_bands[i], i+1)
+                    
+                    # Reproject and clip Sentinel-2 after image to match classification bounds
+                    after_sentinel_wgs84_path = os.path.join(temp_dir, f"after_sentinel_wgs84_{after_year}_{time.time()}.tif")
+                    with rasterio.open(after_sentinel_utm_path) as src:
+                        # Use the same dimensions and transform as the classification
+                        dst_kwargs = src.meta.copy()
+                        dst_kwargs.update({
+                            'crs': 'EPSG:4326',
+                            'transform': target_transform,
+                            'width': target_width,
+                            'height': target_height
+                        })
+                        
+                        with rasterio.open(after_sentinel_wgs84_path, 'w', **dst_kwargs) as dst:
+                            for i in range(1, 5):  # 4 bands
+                                reproject(
+                                    source=rasterio.band(src, i),
+                                    destination=rasterio.band(dst, i),
+                                    src_transform=src.transform,
+                                    src_crs=src.crs,
+                                    dst_transform=target_transform,
+                                    dst_crs='EPSG:4326',
+                                    resampling=Resampling.bilinear  # Use bilinear for smoother imagery
+                                )
+                    
+                    # Create RGB GeoTIFFs for folium display with exact same bounds
+                    before_rgb_wgs84_path = os.path.join(temp_dir, f"before_rgb_wgs84_{before_year}_{time.time()}.tif")
+                    with rasterio.open(before_sentinel_wgs84_path) as src:
+                        profile = src.profile.copy()
+                        profile.update(count=3, dtype='uint8')  # RGB has 3 bands, ensure uint8
+                        with rasterio.open(before_rgb_wgs84_path, 'w', **profile) as dst:
+                            # Use bands 3,2,1 (R,G,B) from the 4-band image
+                            rgb_data = np.zeros((3, src.height, src.width), dtype=np.uint8)
+                            for i, band_idx in enumerate([3, 2, 1]):  # R,G,B bands
+                                band_data = src.read(band_idx)
+                                # Simple contrast stretch
+                                min_val = np.percentile(band_data[band_data > 0], 2) if np.any(band_data > 0) else 0
+                                max_val = np.percentile(band_data[band_data > 0], 98) if np.any(band_data > 0) else 1
+                                if max_val > min_val:
+                                    rgb_data[i] = np.clip((band_data - min_val) / (max_val - min_val) * 255, 0, 255).astype(np.uint8)
+                                else:
+                                    rgb_data[i] = np.zeros_like(band_data, dtype=np.uint8)
+                            dst.write(rgb_data)
+                    
+                    after_rgb_wgs84_path = os.path.join(temp_dir, f"after_rgb_wgs84_{after_year}_{time.time()}.tif")
+                    with rasterio.open(after_sentinel_wgs84_path) as src:
+                        profile = src.profile.copy()
+                        profile.update(count=3, dtype='uint8')  # RGB has 3 bands, ensure uint8
+                        with rasterio.open(after_rgb_wgs84_path, 'w', **profile) as dst:
+                            # Use bands 3,2,1 (R,G,B) from the 4-band image
+                            rgb_data = np.zeros((3, src.height, src.width), dtype=np.uint8)
+                            for i, band_idx in enumerate([3, 2, 1]):  # R,G,B bands
+                                band_data = src.read(band_idx)
+                                # Simple contrast stretch
+                                min_val = np.percentile(band_data[band_data > 0], 2) if np.any(band_data > 0) else 0
+                                max_val = np.percentile(band_data[band_data > 0], 98) if np.any(band_data > 0) else 1
+                                if max_val > min_val:
+                                    rgb_data[i] = np.clip((band_data - min_val) / (max_val - min_val) * 255, 0, 255).astype(np.uint8)
+                                else:
+                                    rgb_data[i] = np.zeros_like(band_data, dtype=np.uint8)
+                            dst.write(rgb_data)
                 
                 # Add download buttons for classification maps only
                 st.subheader("Download Reprojected Data")
@@ -2314,7 +2284,7 @@ with tab4:
                         }
                     ).add_to(m)
                 
-                # Add Sentinel-2 RGB images if available (these should show normally)
+                # Add Sentinel-2 RGB images if available (these should now align perfectly)
                 if has_sentinel_data and before_rgb_wgs84_path and after_rgb_wgs84_path:
                     try:
                         # Before Sentinel-2 RGB
@@ -2388,6 +2358,11 @@ with tab4:
                         ).add_to(m)
                     except Exception as e:
                         st.warning(f"Could not add change detection mask layer: {str(e)}")
+                
+                # Fit map to the bounds of the data
+                if target_bounds:
+                    m.fit_bounds([[target_bounds.bottom, target_bounds.left], 
+                                  [target_bounds.top, target_bounds.right]])
             
             else:
                 # Fallback for non-georeferenced data
@@ -2406,7 +2381,7 @@ with tab4:
             - Switch between Google Satellite, Google Maps, and OpenStreetMap base layers
             - The map shows before classification in **green** and after classification in **red**
             - Change detection mask shows new buildings in **hot colors** (red/yellow)
-            - Classification layers now have proper transparency - only buildings are colored, background is transparent
+            - All layers are now perfectly aligned with the same extent
             - Click on the map to explore different areas
             """)
             
