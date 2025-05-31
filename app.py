@@ -1739,13 +1739,48 @@ with tab4:
         st.info("Use the layer control to toggle layers and adjust opacity with the sliders next to each layer name.")
         
         try:
-            # Get the polygon used for processing
+            # Get the polygon used for processing and crop it to Sentinel-2 bounds
             if ('region_number' in st.session_state and 
                 'drawn_polygons' in st.session_state and 
                 st.session_state.region_number <= len(st.session_state.drawn_polygons)):
-                selected_polygon = st.session_state.drawn_polygons[st.session_state.region_number - 1]
-                centroid = selected_polygon.centroid
-                center = [centroid.y, centroid.x]
+                original_polygon = st.session_state.drawn_polygons[st.session_state.region_number - 1]
+                
+                # Get Sentinel-2 bounds to crop the region of interest
+                if 'clipped_meta' in st.session_state:
+                    utm_transform = st.session_state.clipped_meta['transform']
+                    utm_crs = st.session_state.clipped_meta['crs']
+                    utm_height = binary_before.shape[0]
+                    utm_width = binary_before.shape[1]
+                    
+                    # Calculate Sentinel-2 bounds in UTM
+                    west = utm_transform.c
+                    north = utm_transform.f
+                    east = west + utm_transform.a * utm_width
+                    south = north + utm_transform.e * utm_height
+                    
+                    # Convert UTM bounds to WGS84
+                    from pyproj import Transformer
+                    transformer = Transformer.from_crs(utm_crs, 'EPSG:4326', always_xy=True)
+                    sw_lon, sw_lat = transformer.transform(west, south)
+                    ne_lon, ne_lat = transformer.transform(east, north)
+                    
+                    # Create bounding box from Sentinel-2 data
+                    sentinel_bbox = box(sw_lon, sw_lat, ne_lon, ne_lat)
+                    
+                    # Crop the original polygon to Sentinel-2 bounds
+                    selected_polygon = original_polygon.intersection(sentinel_bbox)
+                    
+                    # Use the center of the cropped polygon
+                    if not selected_polygon.is_empty:
+                        centroid = selected_polygon.centroid
+                        center = [centroid.y, centroid.x]
+                    else:
+                        center = [35.6892, 51.3890]
+                        selected_polygon = None
+                else:
+                    selected_polygon = original_polygon
+                    centroid = selected_polygon.centroid
+                    center = [centroid.y, centroid.x]
             else:
                 center = [35.6892, 51.3890]
                 selected_polygon = None
@@ -2056,11 +2091,11 @@ with tab4:
                     
                     return f"data:image/png;base64,{img_str}", bounds_latlon
             
-            # Create the folium map
+            # Create the folium map with white background by default
             m = folium.Map(
                 location=center,
                 zoom_start=15,
-                tiles=None
+                tiles=None  # Start with no tiles
             )
             
             # Add fullscreen button
@@ -2071,7 +2106,7 @@ with tab4:
                 force_separate_button=True
             ).add_to(m)
             
-            # Add base layers including None option
+            # Add base layers
             folium.TileLayer(
                 tiles='https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}',
                 attr='Google Satellite',
@@ -2095,26 +2130,36 @@ with tab4:
                 control=True
             ).add_to(m)
             
-            # Add None/White background option - Fixed attribution
-            folium.TileLayer(
-                tiles='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==',
+            # Add None/White background option - Create pure white tiles
+            white_tile = folium.TileLayer(
+                tiles='',
                 name='None',
                 overlay=False,
                 control=True,
-                attr='No basemap'
-            ).add_to(m)
+                attr='No background'
+            )
+            # Override the tile URL to show nothing
+            white_tile._template = folium.Template("""
+                {%- macro script(this, kwargs) %}
+                    var {{ this.get_name() }} = L.tileLayer(
+                        '',
+                        {{ this.options|tojson }}
+                    ).addTo({{ this._parent.get_name() }});
+                {%- endmacro %}
+            """)
+            white_tile.add_to(m)
             
             # Add data layers
-            layer_ids = []
+            layer_names = []
             
             if utm_crs is not None and utm_transform is not None:
-                # Add polygon
-                if selected_polygon:
+                # Add cropped polygon (intersection with Sentinel-2 bounds)
+                if selected_polygon and not selected_polygon.is_empty:
                     gdf = gpd.GeoDataFrame(geometry=[selected_polygon])
                     gdf.crs = "EPSG:4326"
                     folium.GeoJson(
                         gdf.to_json(),
-                        name="Selected Region",
+                        name="Selected Region (Cropped)",
                         style_function=lambda x: {
                             'fillColor': 'transparent',
                             'color': 'red',
@@ -2134,7 +2179,7 @@ with tab4:
                             name=f"Before Sentinel-2 ({before_year})"
                         )
                         layer.add_to(m)
-                        layer_ids.append(f"before_sentinel_{before_year}")
+                        layer_names.append(f"Before Sentinel-2 ({before_year})")
                         
                         img_data, bounds = raster_to_folium_overlay(after_rgb_wgs84_path)
                         layer = folium.raster_layers.ImageOverlay(
@@ -2144,7 +2189,7 @@ with tab4:
                             name=f"After Sentinel-2 ({after_year})"
                         )
                         layer.add_to(m)
-                        layer_ids.append(f"after_sentinel_{after_year}")
+                        layer_names.append(f"After Sentinel-2 ({after_year})")
                     except Exception as e:
                         st.warning(f"Could not add Sentinel-2 layers: {str(e)}")
                 
@@ -2156,11 +2201,11 @@ with tab4:
                         layer = folium.raster_layers.ImageOverlay(
                             image=img_data,
                             bounds=bounds,
-                            opacity=1.0,
+                            opacity=0.7,
                             name=f"Before Classification ({before_year})"
                         )
                         layer.add_to(m)
-                        layer_ids.append(f"before_class_{before_year}")
+                        layer_names.append(f"Before Classification ({before_year})")
                     except Exception as e:
                         st.warning(f"Could not add before classification: {str(e)}")
                 
@@ -2171,11 +2216,11 @@ with tab4:
                         layer = folium.raster_layers.ImageOverlay(
                             image=img_data,
                             bounds=bounds,
-                            opacity=1.0,
+                            opacity=0.7,
                             name=f"After Classification ({after_year})"
                         )
                         layer.add_to(m)
-                        layer_ids.append(f"after_class_{after_year}")
+                        layer_names.append(f"After Classification ({after_year})")
                     except Exception as e:
                         st.warning(f"Could not add after classification: {str(e)}")
                 
@@ -2187,11 +2232,11 @@ with tab4:
                         layer = folium.raster_layers.ImageOverlay(
                             image=img_data,
                             bounds=bounds,
-                            opacity=1.0,
+                            opacity=0.7,
                             name=f"Change Detection ({before_year}-{after_year})"
                         )
                         layer.add_to(m)
-                        layer_ids.append(f"change_mask_{before_year}_{after_year}")
+                        layer_names.append(f"Change Detection ({before_year}-{after_year})")
                     except Exception as e:
                         st.warning(f"Could not add change detection mask: {str(e)}")
                 
@@ -2206,26 +2251,69 @@ with tab4:
             # Add custom CSS and JavaScript for inline opacity controls
             opacity_control_html = f"""
             <style>
+            .opacity-container {{
+                display: flex !important;
+                align-items: center !important;
+                margin-left: 8px !important;
+            }}
             .opacity-slider {{
-                width: 60px !important;
-                height: 15px !important;
-                margin-left: 5px !important;
+                width: 70px !important;
+                height: 18px !important;
+                margin-right: 5px !important;
                 vertical-align: middle !important;
+                -webkit-appearance: none !important;
+                background: #ddd !important;
+                outline: none !important;
+                border-radius: 5px !important;
+            }}
+            .opacity-slider::-webkit-slider-thumb {{
+                -webkit-appearance: none !important;
+                appearance: none !important;
+                width: 15px !important;
+                height: 15px !important;
+                border-radius: 50% !important;
+                background: #04AA6D !important;
+                cursor: pointer !important;
+            }}
+            .opacity-slider::-moz-range-thumb {{
+                width: 15px !important;
+                height: 15px !important;
+                border-radius: 50% !important;
+                background: #04AA6D !important;
+                cursor: pointer !important;
+                border: none !important;
+            }}
+            .opacity-percent {{
+                font-size: 11px !important;
+                color: #333 !important;
+                min-width: 30px !important;
+                font-weight: bold !important;
             }}
             .leaflet-control-layers-overlays label {{
                 display: flex !important;
                 align-items: center !important;
                 justify-content: space-between !important;
-                padding: 2px 5px !important;
+                padding: 5px 8px !important;
+                margin: 2px 0 !important;
             }}
             .leaflet-control-layers-overlays input[type="checkbox"] {{
-                margin-right: 5px !important;
+                margin-right: 8px !important;
+            }}
+            .layer-name {{
+                flex-grow: 1 !important;
+                margin-right: 10px !important;
             }}
             </style>
             
             <script>
+            // Store reference to map for opacity control
+            window.mapInstance = null;
+            
             document.addEventListener('DOMContentLoaded', function() {{
                 setTimeout(function() {{
+                    // Get map instance
+                    window.mapInstance = window[Object.keys(window).find(key => key.startsWith('map_'))];
+                    
                     // Find all overlay labels
                     var overlayLabels = document.querySelectorAll('.leaflet-control-layers-overlays label');
                     
@@ -2237,27 +2325,26 @@ with tab4:
                             // Only add sliders to data layers (not Selected Region)
                             if (layerName.includes('Sentinel-2') || layerName.includes('Classification') || layerName.includes('Change Detection')) {{
                                 
-                                // Create slider container
-                                var sliderContainer = document.createElement('div');
-                                sliderContainer.style.display = 'flex';
-                                sliderContainer.style.alignItems = 'center';
-                                sliderContainer.style.marginLeft = 'auto';
+                                // Wrap the layer name in a div
+                                span.className = 'layer-name';
+                                
+                                // Create opacity container
+                                var opacityContainer = document.createElement('div');
+                                opacityContainer.className = 'opacity-container';
                                 
                                 // Create opacity slider
                                 var slider = document.createElement('input');
                                 slider.type = 'range';
                                 slider.min = '0';
                                 slider.max = '100';
-                                slider.value = '80';
+                                slider.value = layerName.includes('Sentinel-2') ? '80' : '70';
                                 slider.className = 'opacity-slider';
                                 slider.title = 'Adjust opacity';
                                 
                                 // Create percentage display
                                 var percentDisplay = document.createElement('span');
-                                percentDisplay.textContent = '80%';
-                                percentDisplay.style.fontSize = '10px';
-                                percentDisplay.style.marginLeft = '3px';
-                                percentDisplay.style.minWidth = '25px';
+                                percentDisplay.textContent = slider.value + '%';
+                                percentDisplay.className = 'opacity-percent';
                                 
                                 // Add event listener to slider
                                 slider.addEventListener('input', function() {{
@@ -2266,9 +2353,8 @@ with tab4:
                                     
                                     // Find the corresponding layer and update opacity
                                     var checkbox = label.querySelector('input[type="checkbox"]');
-                                    if (checkbox && checkbox.checked) {{
-                                        // Get all image overlays
-                                        window.map.eachLayer(function(layer) {{
+                                    if (checkbox && checkbox.checked && window.mapInstance) {{
+                                        window.mapInstance.eachLayer(function(layer) {{
                                             if (layer.options && layer.options.name === layerName) {{
                                                 if (layer.setOpacity) {{
                                                     layer.setOpacity(opacity);
@@ -2282,10 +2368,10 @@ with tab4:
                                 var checkbox = label.querySelector('input[type="checkbox"]');
                                 if (checkbox) {{
                                     checkbox.addEventListener('change', function() {{
-                                        if (this.checked) {{
+                                        if (this.checked && window.mapInstance) {{
                                             var opacity = slider.value / 100;
                                             setTimeout(function() {{
-                                                window.map.eachLayer(function(layer) {{
+                                                window.mapInstance.eachLayer(function(layer) {{
                                                     if (layer.options && layer.options.name === layerName) {{
                                                         if (layer.setOpacity) {{
                                                             layer.setOpacity(opacity);
@@ -2297,13 +2383,13 @@ with tab4:
                                     }});
                                 }}
                                 
-                                sliderContainer.appendChild(slider);
-                                sliderContainer.appendChild(percentDisplay);
-                                label.appendChild(sliderContainer);
+                                opacityContainer.appendChild(slider);
+                                opacityContainer.appendChild(percentDisplay);
+                                label.appendChild(opacityContainer);
                             }}
                         }}
                     }});
-                }}, 1000);
+                }}, 1500);
             }});
             </script>
             """
@@ -2318,14 +2404,14 @@ with tab4:
             st.info("""
             **Interactive Map Features:**
             - **Fullscreen**: Click the fullscreen button (top-left) to expand the map
-            - **Base Layers**: Switch between Google Satellite, Google Maps, OpenStreetMap, or None (white background)
+            - **Base Layers**: Switch between Google Satellite, Google Maps, OpenStreetMap, or None (pure white background)
             - **Layer Control**: Toggle layers on/off using checkboxes
-            - **Opacity Control**: Adjust transparency using the sliders next to each layer name
+            - **Opacity Control**: Adjust transparency using the sliders next to each layer name (0-100%)
             - **Color Coding**: 
               - Before classification: **Green**
               - After classification: **Red** 
               - Change detection: **Hot colors** (red/yellow)
-              - Selected region: **Red outline**
+              - Selected region: **Red outline** (cropped to Sentinel-2 bounds)
             - All layers are perfectly aligned and clipped to the same extent
             """)
             
