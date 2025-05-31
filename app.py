@@ -1648,7 +1648,6 @@ with tab3:
 
 # Fourth tab - Change Detection
 with tab4:
-    
     st.header("Building Change Detection")
 
     # Import required libraries
@@ -1660,9 +1659,11 @@ with tab4:
     from shapely.geometry import mapping
     import io
     from PIL import Image
-    import leafmap.foliumap as leafmap
+    import folium  # Changed to folium
+    from folium import plugins
     import json
     import geopandas as gpd
+    import base64
 
     # 1) Retrieve the processed classification arrays
     before_year = st.session_state.get("before_year", "2021")
@@ -1739,28 +1740,15 @@ with tab4:
         
         try:
             # Get the polygon used for processing
-            if 'region_number' in st.session_state and st.session_state.region_number <= len(st.session_state.drawn_polygons):
+            if ('region_number' in st.session_state and 
+                'drawn_polygons' in st.session_state and 
+                st.session_state.region_number <= len(st.session_state.drawn_polygons)):
                 selected_polygon = st.session_state.drawn_polygons[st.session_state.region_number - 1]
                 centroid = selected_polygon.centroid
                 center = [centroid.y, centroid.x]  # [lat, lon]
             else:
                 center = [35.6892, 51.3890]  # Default center (Tehran)
-            
-            # Function to create RGB images from multispectral data
-            def create_rgb_image(img_array, bands=(3, 2, 1), percentile=(2, 98)):
-                """Create RGB composite from multispectral image array"""
-                h, w = img_array.shape[1], img_array.shape[2]
-                rgb = np.zeros((h, w, 3), dtype=np.float32)
-                
-                for i, band in enumerate(bands):
-                    if band < img_array.shape[0]:
-                        band_data = img_array[band]
-                        # Simple contrast stretch
-                        min_val = np.percentile(band_data, percentile[0])
-                        max_val = np.percentile(band_data, percentile[1])
-                        rgb[:, :, i] = np.clip((band_data - min_val) / (max_val - min_val), 0, 1)
-                
-                return rgb
+                selected_polygon = None
             
             # Create and save the images as temporary files
             temp_dir = tempfile.gettempdir()
@@ -1779,10 +1767,16 @@ with tab4:
                 utm_crs = st.session_state.clipped_meta['crs']
                 utm_height = st.session_state.clipped_img.shape[1]
                 utm_width = st.session_state.clipped_img.shape[2]
-                bounds = selected_polygon.bounds  # Use polygon bounds
+                if selected_polygon:
+                    bounds = selected_polygon.bounds  # Use polygon bounds
+                else:
+                    bounds = None
             else:
                 # Fallback to polygon bounds
-                bounds = selected_polygon.bounds
+                if selected_polygon:
+                    bounds = selected_polygon.bounds
+                else:
+                    bounds = None
                 utm_crs = None
                 utm_transform = None
                 utm_height = binary_before.shape[0]
@@ -1903,11 +1897,11 @@ with tab4:
                                 resampling=Resampling.nearest
                             )
                 
-                # Create RGB GeoTIFFs for leafmap display
+                # Create RGB GeoTIFFs for folium display
                 before_rgb_wgs84_path = os.path.join(temp_dir, f"before_rgb_wgs84_{before_year}_{time.time()}.tif")
                 with rasterio.open(before_sentinel_wgs84_path) as src:
                     profile = src.profile.copy()
-                    profile.update(count=3)  # RGB has 3 bands
+                    profile.update(count=3, dtype='uint8')  # RGB has 3 bands, ensure uint8
                     with rasterio.open(before_rgb_wgs84_path, 'w', **profile) as dst:
                         # Use bands 3,2,1 (R,G,B) from the 4-band image
                         rgb_data = np.zeros((3, src.height, src.width), dtype=np.uint8)
@@ -1916,13 +1910,16 @@ with tab4:
                             # Simple contrast stretch
                             min_val = np.percentile(band_data, 2)
                             max_val = np.percentile(band_data, 98)
-                            rgb_data[i] = np.clip((band_data - min_val) / (max_val - min_val) * 255, 0, 255).astype(np.uint8)
+                            if max_val > min_val:
+                                rgb_data[i] = np.clip((band_data - min_val) / (max_val - min_val) * 255, 0, 255).astype(np.uint8)
+                            else:
+                                rgb_data[i] = np.zeros_like(band_data, dtype=np.uint8)
                         dst.write(rgb_data)
                 
                 after_rgb_wgs84_path = os.path.join(temp_dir, f"after_rgb_wgs84_{after_year}_{time.time()}.tif")
                 with rasterio.open(after_sentinel_wgs84_path) as src:
                     profile = src.profile.copy()
-                    profile.update(count=3)  # RGB has 3 bands
+                    profile.update(count=3, dtype='uint8')  # RGB has 3 bands, ensure uint8
                     with rasterio.open(after_rgb_wgs84_path, 'w', **profile) as dst:
                         # Use bands 3,2,1 (R,G,B) from the 4-band image
                         rgb_data = np.zeros((3, src.height, src.width), dtype=np.uint8)
@@ -1931,7 +1928,10 @@ with tab4:
                             # Simple contrast stretch
                             min_val = np.percentile(band_data, 2)
                             max_val = np.percentile(band_data, 98)
-                            rgb_data[i] = np.clip((band_data - min_val) / (max_val - min_val) * 255, 0, 255).astype(np.uint8)
+                            if max_val > min_val:
+                                rgb_data[i] = np.clip((band_data - min_val) / (max_val - min_val) * 255, 0, 255).astype(np.uint8)
+                            else:
+                                rgb_data[i] = np.zeros_like(band_data, dtype=np.uint8)
                         dst.write(rgb_data)
             
             # Create properly georeferenced GeoTIFFs for classification results
@@ -2173,233 +2173,209 @@ with tab4:
                         key="download_change_mask_png"
                     )
             
-            # Create the leafmap map
-            m = leafmap.Map(
-                center=center,
-                zoom=15,
-                height="600px"
+            # Function to convert raster to image overlay for folium
+            def raster_to_folium_overlay(raster_path, colormap='viridis', opacity=0.7):
+                """Convert a raster file to a folium image overlay"""
+                with rasterio.open(raster_path) as src:
+                    # Read the data
+                    data = src.read(1)  # Read first band
+                    
+                    # Get bounds in lat/lon
+                    bounds = src.bounds
+                    bounds_latlon = [[bounds.bottom, bounds.left], [bounds.top, bounds.right]]
+                    
+                    # Handle different data types and create colored image
+                    if data.dtype == np.uint8:
+                        # For RGB images or already processed data
+                        if src.count == 3:  # RGB
+                            rgb_data = src.read([1, 2, 3])
+                            img_array = np.transpose(rgb_data, (1, 2, 0))
+                        else:  # Single band
+                            # Apply colormap
+                            import matplotlib.pyplot as plt
+                            import matplotlib.cm as cm
+                            
+                            # Normalize data
+                            data_norm = data / 255.0
+                            
+                            # Apply colormap
+                            if colormap == 'Greens':
+                                cmap = cm.Greens
+                            elif colormap == 'Reds':
+                                cmap = cm.Reds
+                            elif colormap == 'hot':
+                                cmap = cm.hot
+                            else:
+                                cmap = cm.viridis
+                            
+                            img_array = cmap(data_norm)
+                            img_array = (img_array[:, :, :3] * 255).astype(np.uint8)
+                    else:
+                        # For other data types, normalize and apply colormap
+                        import matplotlib.pyplot as plt
+                        import matplotlib.cm as cm
+                        
+                        # Normalize data
+                        data_min, data_max = np.nanmin(data), np.nanmax(data)
+                        if data_max > data_min:
+                            data_norm = (data - data_min) / (data_max - data_min)
+                        else:
+                            data_norm = np.zeros_like(data)
+                        
+                        # Apply colormap
+                        if colormap == 'Greens':
+                            cmap = cm.Greens
+                        elif colormap == 'Reds':
+                            cmap = cm.Reds
+                        elif colormap == 'hot':
+                            cmap = cm.hot
+                        else:
+                            cmap = cm.viridis
+                        
+                        img_array = cmap(data_norm)
+                        img_array = (img_array[:, :, :3] * 255).astype(np.uint8)
+                    
+                    # Convert to PIL Image
+                    pil_img = Image.fromarray(img_array)
+                    
+                    # Convert to base64 for folium
+                    img_buffer = io.BytesIO()
+                    pil_img.save(img_buffer, format='PNG')
+                    img_str = base64.b64encode(img_buffer.getvalue()).decode()
+                    
+                    return f"data:image/png;base64,{img_str}", bounds_latlon
+            
+            # Create the folium map
+            m = folium.Map(
+                location=center,
+                zoom_start=15,
+                tiles=None  # We'll add tiles manually
             )
             
-            # Add base layers (will be at bottom of the stack)
-            m.add_basemap("SATELLITE")  # Google Satellite
-            m.add_basemap("ROADMAP")    # Google Maps
+            # Add base layers
+            folium.TileLayer(
+                tiles='https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}',
+                attr='Google Satellite',
+                name='Google Satellite',
+                overlay=False,
+                control=True
+            ).add_to(m)
+            
+            folium.TileLayer(
+                tiles='https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}',
+                attr='Google Maps',
+                name='Google Maps',
+                overlay=False,
+                control=True
+            ).add_to(m)
+            
+            # Add OpenStreetMap as default
+            folium.TileLayer(
+                tiles='OpenStreetMap',
+                name='OpenStreetMap',
+                overlay=False,
+                control=True
+            ).add_to(m)
             
             # Add GeoTIFF layers with proper georeferencing
             if utm_crs is not None and utm_transform is not None:
                 # Add drawn polygon to the map
-                if 'region_number' in st.session_state:
+                if selected_polygon and 'region_number' in st.session_state:
                     # Create a GeoDataFrame from the polygon
                     gdf = gpd.GeoDataFrame(geometry=[selected_polygon])
                     gdf.crs = "EPSG:4326"  # Set the CRS to WGS84
                     
-                    # Convert to proper GeoJSON format
-                    geojson_data = json.loads(gdf.to_json())
-                    
-                    # Add to map
-                    try:
-                        m.add_geojson(
-                            geojson_data,
-                            layer_name="Selected Region",
-                            style={
-                                'color': 'red',
-                                'fillColor': 'transparent',
-                                'weight': 2
-                            }
-                        )
-                    except Exception as e:
-                        st.warning(f"Could not add region boundary: {str(e)}")
-                        # Fallback: add a simple marker at the center
-                        m.add_marker(location=center, popup="Selected Region Center")
+                    # Convert to GeoJSON and add to map
+                    folium.GeoJson(
+                        gdf.to_json(),
+                        name="Selected Region",
+                        style_function=lambda x: {
+                            'fillColor': 'transparent',
+                            'color': 'red',
+                            'weight': 2,
+                            'fillOpacity': 0
+                        }
+                    ).add_to(m)
                 
-                # Add layers in the following order (bottom to top):
-                # 1. Sentinel-2 images (if available)
-                # 2. Before classification (green)
-                # 3. After classification (red)
-                # 4. Change detection mask
-                
+                # Add Sentinel-2 RGB images if available
                 if has_sentinel_data and before_rgb_wgs84_path and after_rgb_wgs84_path:
-                    # Add Sentinel-2 RGB images - using the RGB composites
-                    m.add_raster(
-                        before_rgb_wgs84_path,
-                        layer_name=f"Before Sentinel-2 ({before_year})",
-                        opacity=0.7
-                    )
-                    
-                    m.add_raster(
-                        after_rgb_wgs84_path,
-                        layer_name=f"After Sentinel-2 ({after_year})",
-                        opacity=0.7
-                    )
+                    try:
+                        # Before Sentinel-2 RGB
+                        img_data, bounds = raster_to_folium_overlay(before_rgb_wgs84_path)
+                        folium.raster_layers.ImageOverlay(
+                            image=img_data,
+                            bounds=bounds,
+                            opacity=0.7,
+                            name=f"Before Sentinel-2 ({before_year})"
+                        ).add_to(m)
+                        
+                        # After Sentinel-2 RGB
+                        img_data, bounds = raster_to_folium_overlay(after_rgb_wgs84_path)
+                        folium.raster_layers.ImageOverlay(
+                            image=img_data,
+                            bounds=bounds,
+                            opacity=0.7,
+                            name=f"After Sentinel-2 ({after_year})"
+                        ).add_to(m)
+                    except Exception as e:
+                        st.warning(f"Could not add Sentinel-2 RGB layers: {str(e)}")
                 
-                # Add before classification with green colormap (for interactive map only)
-                m.add_raster(
-                    before_class_wgs84_path,
-                    layer_name=f"Before Classification ({before_year})",
-                    opacity=0.7,
-                    colormap="Greens"  # Green for interactive map
-                )
+                # Add classification layers
+                if before_class_wgs84_path:
+                    try:
+                        img_data, bounds = raster_to_folium_overlay(before_class_wgs84_path, colormap='Greens')
+                        folium.raster_layers.ImageOverlay(
+                            image=img_data,
+                            bounds=bounds,
+                            opacity=0.7,
+                            name=f"Before Classification ({before_year})"
+                        ).add_to(m)
+                    except Exception as e:
+                        st.warning(f"Could not add before classification layer: {str(e)}")
                 
-                # Add after classification with red colormap (for interactive map only)
-                m.add_raster(
-                    after_class_wgs84_path,
-                    layer_name=f"After Classification ({after_year})",
-                    opacity=0.7,
-                    colormap="Reds"  # Red for interactive map
-                )
+                if after_class_wgs84_path:
+                    try:
+                        img_data, bounds = raster_to_folium_overlay(after_class_wgs84_path, colormap='Reds')
+                        folium.raster_layers.ImageOverlay(
+                            image=img_data,
+                            bounds=bounds,
+                            opacity=0.7,
+                            name=f"After Classification ({after_year})"
+                        ).add_to(m)
+                    except Exception as e:
+                        st.warning(f"Could not add after classification layer: {str(e)}")
                 
                 # Add change detection mask
-                m.add_raster(
-                    change_mask_wgs84_path,
-                    layer_name=f"Change Detection Mask ({before_year}-{after_year})",
-                    opacity=0.7,
-                    colormap="hot"
-                )
-                
+                if change_mask_wgs84_path:
+                    try:
+                        img_data, bounds = raster_to_folium_overlay(change_mask_wgs84_path, colormap='hot')
+                        folium.raster_layers.ImageOverlay(
+                            image=img_data,
+                            bounds=bounds,
+                            opacity=0.7,
+                            name=f"Change Detection Mask ({before_year}-{after_year})"
+                        ).add_to(m)
+                    except Exception as e:
+                        st.warning(f"Could not add change detection mask layer: {str(e)}")
+            
             else:
                 # Fallback for non-georeferenced data
                 st.warning("Cannot display non-georeferenced data in the interactive map.")
             
-            # Add the standard layer control
-            m.add_layer_control()
+            # Add layer control
+            folium.LayerControl().add_to(m)
             
-            # Inject custom JavaScript to enhance layer control with embedded opacity sliders
-            # This mimics the Google Earth Engine style opacity controls
-            custom_js = """
-            <script>
-            // Function to add inline opacity sliders to layer control
-            function addInlineOpacityControls() {
-                // Wait for layer control to be available in the DOM
-                setTimeout(function() {
-                    // Find all layer control labels
-                    var labels = document.querySelectorAll('.leaflet-control-layers-overlays label');
-                    
-                    // Process each label
-                    labels.forEach(function(label) {
-                        // Skip if this label already has a slider
-                        if (label.querySelector('.inline-opacity-slider')) return;
-                        
-                        // Get the layer name from the label
-                        var layerName = label.textContent.trim();
-                        if (!layerName) return;
-                        
-                        // Create the slider container
-                        var sliderContainer = document.createElement('div');
-                        sliderContainer.className = 'inline-opacity-slider';
-                        sliderContainer.style.marginTop = '3px';
-                        sliderContainer.style.marginLeft = '20px';
-                        sliderContainer.style.width = 'calc(100% - 25px)';
-                        
-                        // Create the slider
-                        var slider = document.createElement('input');
-                        slider.type = 'range';
-                        slider.min = 0;
-                        slider.max = 100;
-                        slider.value = 70; // Default opacity 0.7
-                        slider.style.width = '100%';
-                        slider.style.height = '5px';
-                        slider.style.margin = '0';
-                        
-                        // Add the slider to its container
-                        sliderContainer.appendChild(slider);
-                        
-                        // Add the slider container to the label
-                        label.appendChild(sliderContainer);
-                        
-                        // Add event listener to the slider
-                        slider.addEventListener('input', function(e) {
-                            // Find the layer by name and update its opacity
-                            var mapLayers = Object.values(window.leafletMap._layers);
-                            for (var i = 0; i < mapLayers.length; i++) {
-                                var layer = mapLayers[i];
-                                // Check if this is the right layer
-                                if (layer.options && layer.options.name === layerName) {
-                                    layer.setOpacity(e.target.value / 100);
-                                    break;
-                                }
-                            }
-                        });
-                    });
-                }, 1000); // Wait 1 second for the layer control to be fully rendered
-            }
-            
-            // Store a reference to the map
-            if (document.readyState === 'complete' || document.readyState === 'interactive') {
-                setTimeout(function() {
-                    window.leafletMap = document.querySelector('.folium-map')._leaflet_map;
-                    addInlineOpacityControls();
-                    
-                    // Add listener for layer control expand/collapse
-                    var layerControl = document.querySelector('.leaflet-control-layers');
-                    if (layerControl) {
-                        layerControl.addEventListener('click', function() {
-                            setTimeout(addInlineOpacityControls, 100);
-                        });
-                    }
-                }, 1000);
-            } else {
-                document.addEventListener('DOMContentLoaded', function() {
-                    setTimeout(function() {
-                        window.leafletMap = document.querySelector('.folium-map')._leaflet_map;
-                        addInlineOpacityControls();
-                        
-                        // Add listener for layer control expand/collapse
-                        var layerControl = document.querySelector('.leaflet-control-layers');
-                        if (layerControl) {
-                            layerControl.addEventListener('click', function() {
-                                setTimeout(addInlineOpacityControls, 100);
-                            });
-                        }
-                    }, 1000);
-                });
-            }
-            </script>
-            
-            <style>
-            /* Style the opacity slider */
-            .inline-opacity-slider input[type=range] {
-                -webkit-appearance: none;
-                background: linear-gradient(to right, rgba(0,0,0,0.1), rgba(0,0,0,1));
-                height: 5px;
-                border-radius: 2px;
-            }
-            
-            .inline-opacity-slider input[type=range]::-webkit-slider-thumb {
-                -webkit-appearance: none;
-                width: 12px;
-                height: 12px;
-                border-radius: 50%;
-                background: #4285f4;
-                cursor: pointer;
-            }
-            
-            .inline-opacity-slider input[type=range]::-moz-range-thumb {
-                width: 12px;
-                height: 12px;
-                border-radius: 50%;
-                background: #4285f4;
-                cursor: pointer;
-            }
-            
-            /* Make the layer control wider to accommodate sliders */
-            .leaflet-control-layers {
-                min-width: 200px;
-            }
-            </style>
-            """
-            
-            # Display the map with custom JS injected
-            components = m.to_streamlit(height=600, add_layer_control=False)
-            
-            # Inject the custom JavaScript
-            st.components.v1.html(custom_js, height=0)
+            # Display the map in Streamlit
+            st_folium_data = st_folium(m, width=700, height=500)
             
             # Add explanation for the interactive map
             st.info("""
-            **Interactive Map Usage:**
-            - Use the layer control in the upper-right to toggle layers on/off
-            - Adjust layer opacity using the slider in the layer control
-            - Switch between Google Satellite and Google Maps base layers
+            **Interactive Map Usage (Folium):**
+            - Use the layer control in the top-right to toggle layers on/off
+            - Switch between Google Satellite, Google Maps, and OpenStreetMap base layers
             - The map shows before classification in green and after classification in red
+            - Change detection mask shows new buildings in hot colors (red/yellow)
+            - Click on the map to explore different areas
             """)
             
         except Exception as e:
@@ -2408,12 +2384,6 @@ with tab4:
             st.error(traceback.format_exc())
     else:
         st.info("After applying erosion, the interactive map will appear here.")
-
-
-
-
-
-
 
 
 
