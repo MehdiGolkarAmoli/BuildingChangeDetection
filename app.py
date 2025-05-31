@@ -2140,6 +2140,7 @@ with tab4: # This line is commented out as the code below is the content of tab4
                 center_lon = (target_bounds.left + target_bounds.right) / 2
                 center = [center_lat, center_lon]
                 
+                # Create map with no default tiles (tiles=None)
                 m = folium.Map(location=center, zoom_start=16, tiles=None)
                 
                 # Add fullscreen plugin
@@ -2148,22 +2149,41 @@ with tab4: # This line is commented out as the code below is the content of tab4
                     title_cancel='Exit fullscreen', force_separate_button=True
                 ).add_to(m)
 
-                # Add base layers
+                # Add White Background as the first base layer (default)
+                folium.TileLayer(
+                    tiles='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==',
+                    attr='White Background', 
+                    name='White Background', 
+                    overlay=False, 
+                    control=True,
+                    show=True  # This will be the default selected background
+                ).add_to(m)
+
+                # Add other base layers
                 folium.TileLayer(
                     tiles='https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', 
-                    attr='Google Satellite', name='Google Satellite', 
-                    overlay=False, control=True
+                    attr='Google Satellite', 
+                    name='Google Satellite', 
+                    overlay=False, 
+                    control=True,
+                    show=False
                 ).add_to(m)
                 
                 folium.TileLayer(
                     tiles='https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}', 
-                    attr='Google Maps', name='Google Maps', 
-                    overlay=False, control=True
+                    attr='Google Maps', 
+                    name='Google Maps', 
+                    overlay=False, 
+                    control=True,
+                    show=False
                 ).add_to(m)
                 
                 folium.TileLayer(
-                    tiles='OpenStreetMap', name='OpenStreetMap', 
-                    overlay=False, control=True, show=True
+                    tiles='OpenStreetMap', 
+                    name='OpenStreetMap', 
+                    overlay=False, 
+                    control=True, 
+                    show=False
                 ).add_to(m)
 
                 # Add region boundary if available
@@ -2249,7 +2269,11 @@ with tab4: # This line is commented out as the code below is the content of tab4
                 - 🎯 **Centered** on the actual data bounds (Sentinel-2 and classification data)
                 - 🔄 **Layer Control**: Toggle layers on/off (top-right corner)
                 - 📱 **Fullscreen**: Click fullscreen button for better viewing
-                - 🌍 **Base Maps**: Google Satellite, Google Maps, OpenStreetMap
+                - 🌍 **Base Maps**: 
+                  - **White Background** (Default - No interference with your data)
+                  - Google Satellite
+                  - Google Maps
+                  - OpenStreetMap
                 - 📊 **Data Layers**: 
                   - Sentinel-2 RGB ({before_year} & {after_year})
                   - Building Classifications (Green: {before_year}, Red: {after_year})
