@@ -1661,6 +1661,7 @@ with tab4:
     from PIL import Image
     import folium  # Changed to folium
     from folium import plugins
+    from streamlit_folium import st_folium
     import json
     import geopandas as gpd
     import base64
@@ -2173,9 +2174,9 @@ with tab4:
                         key="download_change_mask_png"
                     )
             
-            # Function to convert raster to image overlay for folium
-            def raster_to_folium_overlay(raster_path, colormap='viridis', opacity=0.7):
-                """Convert a raster file to a folium image overlay"""
+            # Function to convert raster to image overlay for folium with proper transparency handling
+            def raster_to_folium_overlay(raster_path, colormap='viridis', opacity=0.7, is_binary=False):
+                """Convert a raster file to a folium image overlay with proper transparency"""
                 with rasterio.open(raster_path) as src:
                     # Read the data
                     data = src.read(1)  # Read first band
@@ -2184,59 +2185,75 @@ with tab4:
                     bounds = src.bounds
                     bounds_latlon = [[bounds.bottom, bounds.left], [bounds.top, bounds.right]]
                     
-                    # Handle different data types and create colored image
-                    if data.dtype == np.uint8:
-                        # For RGB images or already processed data
-                        if src.count == 3:  # RGB
-                            rgb_data = src.read([1, 2, 3])
-                            img_array = np.transpose(rgb_data, (1, 2, 0))
-                        else:  # Single band
-                            # Apply colormap
-                            import matplotlib.pyplot as plt
-                            import matplotlib.cm as cm
+                    # Handle binary classification data specially
+                    if is_binary:
+                        # Create RGBA image for binary data
+                        rgba_array = np.zeros((data.shape[0], data.shape[1], 4), dtype=np.uint8)
+                        
+                        if colormap == 'Greens':
+                            # Green for buildings (value = 1), transparent for non-buildings (value = 0)
+                            mask = data == 1
+                            rgba_array[mask, 0] = 0      # Red
+                            rgba_array[mask, 1] = 255    # Green
+                            rgba_array[mask, 2] = 0      # Blue
+                            rgba_array[mask, 3] = 180    # Alpha (transparency)
                             
-                            # Normalize data
-                            data_norm = data / 255.0
-                            
-                            # Apply colormap
-                            if colormap == 'Greens':
-                                cmap = cm.Greens
-                            elif colormap == 'Reds':
-                                cmap = cm.Reds
-                            elif colormap == 'hot':
-                                cmap = cm.hot
-                            else:
-                                cmap = cm.viridis
-                            
-                            img_array = cmap(data_norm)
-                            img_array = (img_array[:, :, :3] * 255).astype(np.uint8)
-                    else:
-                        # For other data types, normalize and apply colormap
+                        elif colormap == 'Reds':
+                            # Red for buildings (value = 1), transparent for non-buildings (value = 0)
+                            mask = data == 1
+                            rgba_array[mask, 0] = 255    # Red
+                            rgba_array[mask, 1] = 0      # Green
+                            rgba_array[mask, 2] = 0      # Blue
+                            rgba_array[mask, 3] = 180    # Alpha (transparency)
+                        
+                        # Convert to PIL Image
+                        pil_img = Image.fromarray(rgba_array, 'RGBA')
+                    
+                    elif colormap == 'hot' and data.max() > 1:
+                        # For change detection mask (values 0-255)
                         import matplotlib.pyplot as plt
                         import matplotlib.cm as cm
                         
                         # Normalize data
-                        data_min, data_max = np.nanmin(data), np.nanmax(data)
-                        if data_max > data_min:
-                            data_norm = (data - data_min) / (data_max - data_min)
-                        else:
-                            data_norm = np.zeros_like(data)
+                        data_norm = data / 255.0
                         
-                        # Apply colormap
-                        if colormap == 'Greens':
-                            cmap = cm.Greens
-                        elif colormap == 'Reds':
-                            cmap = cm.Reds
-                        elif colormap == 'hot':
-                            cmap = cm.hot
-                        else:
-                            cmap = cm.viridis
+                        # Apply hot colormap
+                        cmap = cm.hot
+                        rgba_array = cmap(data_norm)
                         
-                        img_array = cmap(data_norm)
-                        img_array = (img_array[:, :, :3] * 255).astype(np.uint8)
+                        # Set transparency for zero values
+                        rgba_array[data == 0, 3] = 0  # Fully transparent for zero values
+                        rgba_array[data > 0, 3] = 0.8  # Semi-transparent for non-zero values
+                        
+                        # Convert to uint8
+                        rgba_array = (rgba_array * 255).astype(np.uint8)
+                        
+                        # Convert to PIL Image
+                        pil_img = Image.fromarray(rgba_array, 'RGBA')
                     
-                    # Convert to PIL Image
-                    pil_img = Image.fromarray(img_array)
+                    else:
+                        # For RGB Sentinel-2 images
+                        if src.count == 3:  # RGB
+                            rgb_data = src.read([1, 2, 3])
+                            img_array = np.transpose(rgb_data, (1, 2, 0))
+                            pil_img = Image.fromarray(img_array)
+                        else:
+                            # Single band - apply colormap
+                            import matplotlib.pyplot as plt
+                            import matplotlib.cm as cm
+                            
+                            # Normalize data
+                            data_min, data_max = np.nanmin(data), np.nanmax(data)
+                            if data_max > data_min:
+                                data_norm = (data - data_min) / (data_max - data_min)
+                            else:
+                                data_norm = np.zeros_like(data)
+                            
+                            # Apply colormap
+                            cmap = cm.viridis
+                            img_array = cmap(data_norm)
+                            img_array = (img_array[:, :, :3] * 255).astype(np.uint8)
+                            pil_img = Image.fromarray(img_array)
                     
                     # Convert to base64 for folium
                     img_buffer = io.BytesIO()
@@ -2297,37 +2314,42 @@ with tab4:
                         }
                     ).add_to(m)
                 
-                # Add Sentinel-2 RGB images if available
+                # Add Sentinel-2 RGB images if available (these should show normally)
                 if has_sentinel_data and before_rgb_wgs84_path and after_rgb_wgs84_path:
                     try:
                         # Before Sentinel-2 RGB
-                        img_data, bounds = raster_to_folium_overlay(before_rgb_wgs84_path)
+                        img_data, bounds = raster_to_folium_overlay(before_rgb_wgs84_path, opacity=0.8)
                         folium.raster_layers.ImageOverlay(
                             image=img_data,
                             bounds=bounds,
-                            opacity=0.7,
+                            opacity=0.8,
                             name=f"Before Sentinel-2 ({before_year})"
                         ).add_to(m)
                         
                         # After Sentinel-2 RGB
-                        img_data, bounds = raster_to_folium_overlay(after_rgb_wgs84_path)
+                        img_data, bounds = raster_to_folium_overlay(after_rgb_wgs84_path, opacity=0.8)
                         folium.raster_layers.ImageOverlay(
                             image=img_data,
                             bounds=bounds,
-                            opacity=0.7,
+                            opacity=0.8,
                             name=f"After Sentinel-2 ({after_year})"
                         ).add_to(m)
                     except Exception as e:
                         st.warning(f"Could not add Sentinel-2 RGB layers: {str(e)}")
                 
-                # Add classification layers
+                # Add classification layers with binary handling
                 if before_class_wgs84_path:
                     try:
-                        img_data, bounds = raster_to_folium_overlay(before_class_wgs84_path, colormap='Greens')
+                        img_data, bounds = raster_to_folium_overlay(
+                            before_class_wgs84_path, 
+                            colormap='Greens', 
+                            opacity=0.7, 
+                            is_binary=True
+                        )
                         folium.raster_layers.ImageOverlay(
                             image=img_data,
                             bounds=bounds,
-                            opacity=0.7,
+                            opacity=1.0,  # Use full opacity since transparency is handled in the image
                             name=f"Before Classification ({before_year})"
                         ).add_to(m)
                     except Exception as e:
@@ -2335,11 +2357,16 @@ with tab4:
                 
                 if after_class_wgs84_path:
                     try:
-                        img_data, bounds = raster_to_folium_overlay(after_class_wgs84_path, colormap='Reds')
+                        img_data, bounds = raster_to_folium_overlay(
+                            after_class_wgs84_path, 
+                            colormap='Reds', 
+                            opacity=0.7, 
+                            is_binary=True
+                        )
                         folium.raster_layers.ImageOverlay(
                             image=img_data,
                             bounds=bounds,
-                            opacity=0.7,
+                            opacity=1.0,  # Use full opacity since transparency is handled in the image
                             name=f"After Classification ({after_year})"
                         ).add_to(m)
                     except Exception as e:
@@ -2348,11 +2375,15 @@ with tab4:
                 # Add change detection mask
                 if change_mask_wgs84_path:
                     try:
-                        img_data, bounds = raster_to_folium_overlay(change_mask_wgs84_path, colormap='hot')
+                        img_data, bounds = raster_to_folium_overlay(
+                            change_mask_wgs84_path, 
+                            colormap='hot', 
+                            opacity=0.7
+                        )
                         folium.raster_layers.ImageOverlay(
                             image=img_data,
                             bounds=bounds,
-                            opacity=0.7,
+                            opacity=1.0,  # Use full opacity since transparency is handled in the image
                             name=f"Change Detection Mask ({before_year}-{after_year})"
                         ).add_to(m)
                     except Exception as e:
@@ -2373,8 +2404,9 @@ with tab4:
             **Interactive Map Usage (Folium):**
             - Use the layer control in the top-right to toggle layers on/off
             - Switch between Google Satellite, Google Maps, and OpenStreetMap base layers
-            - The map shows before classification in green and after classification in red
-            - Change detection mask shows new buildings in hot colors (red/yellow)
+            - The map shows before classification in **green** and after classification in **red**
+            - Change detection mask shows new buildings in **hot colors** (red/yellow)
+            - Classification layers now have proper transparency - only buildings are colored, background is transparent
             - Click on the map to explore different areas
             """)
             
@@ -2384,6 +2416,3 @@ with tab4:
             st.error(traceback.format_exc())
     else:
         st.info("After applying erosion, the interactive map will appear here.")
-
-
-
