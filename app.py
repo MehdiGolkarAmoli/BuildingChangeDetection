@@ -1660,7 +1660,7 @@ with tab4:
     from shapely.geometry import mapping, box
     import io
     from PIL import Image
-    import folium  # Changed to folium
+    import folium
     from folium import plugins
     from streamlit_folium import st_folium
     import json
@@ -1697,10 +1697,10 @@ with tab4:
     # 4) Display raw results side by side
     st.subheader("Raw Change Detection")
     fig, axs = plt.subplots(1, 3, figsize=(18, 5))
-    axs[0].imshow(binary_before, cmap="gray")  # Keep as black and white
+    axs[0].imshow(binary_before, cmap="gray")
     axs[0].set_title(f"{before_year} Classification")
     axs[0].axis("off")
-    axs[1].imshow(binary_after, cmap="gray")  # Keep as black and white
+    axs[1].imshow(binary_after, cmap="gray")
     axs[1].set_title(f"{after_year} Classification")
     axs[1].axis("off")
     axs[2].imshow(raw_mask, cmap="hot")
@@ -1711,7 +1711,6 @@ with tab4:
     # 5) Erosion UI
     st.subheader("Refine with Morphological Erosion")
     
-    # Use a unique key for the kernel size selectbox
     kernel = st.selectbox(
         "Kernel size",
         [2, 3, 4, 5, 7, 9],
@@ -1737,8 +1736,7 @@ with tab4:
     if "eroded_result" in st.session_state:
         st.subheader("Interactive Map")
         
-        # Note about layer visibility
-        st.info("Use the layer control in the top-right to toggle layers on/off and adjust opacity. Click the fullscreen button to view the map in fullscreen mode.")
+        st.info("Use the layer control to toggle layers and adjust opacity with the sliders next to each layer name.")
         
         try:
             # Get the polygon used for processing
@@ -1747,12 +1745,11 @@ with tab4:
                 st.session_state.region_number <= len(st.session_state.drawn_polygons)):
                 selected_polygon = st.session_state.drawn_polygons[st.session_state.region_number - 1]
                 centroid = selected_polygon.centroid
-                center = [centroid.y, centroid.x]  # [lat, lon]
+                center = [centroid.y, centroid.x]
             else:
-                center = [35.6892, 51.3890]  # Default center (Tehran)
+                center = [35.6892, 51.3890]
                 selected_polygon = None
             
-            # Create and save the images as temporary files
             temp_dir = tempfile.gettempdir()
             
             # Check if we have the clipped Sentinel-2 data in memory
@@ -1764,47 +1761,35 @@ with tab4:
             
             # Get bounds and CRS information
             if 'clipped_meta' in st.session_state:
-                # Get the UTM transform and CRS from the sentinel data
                 utm_transform = st.session_state.clipped_meta['transform']
                 utm_crs = st.session_state.clipped_meta['crs']
-                utm_height = st.session_state.clipped_img.shape[1]
-                utm_width = st.session_state.clipped_img.shape[2]
-                if selected_polygon:
-                    bounds = selected_polygon.bounds  # Use polygon bounds
-                else:
-                    bounds = None
-            else:
-                # Fallback to polygon bounds
-                if selected_polygon:
-                    bounds = selected_polygon.bounds
-                else:
-                    bounds = None
-                utm_crs = None
-                utm_transform = None
                 utm_height = binary_before.shape[0]
                 utm_width = binary_before.shape[1]
+                
+                # Calculate bounds from transform and dimensions
+                west = utm_transform.c
+                north = utm_transform.f
+                east = west + utm_transform.a * utm_width
+                south = north + utm_transform.e * utm_height
+                utm_bounds = (west, south, east, north)
+            else:
+                utm_crs = None
+                utm_transform = None
+                utm_bounds = None
             
-            # Variables to store paths for download buttons
+            # Variables to store paths
             before_class_wgs84_path = None
             after_class_wgs84_path = None
             change_mask_wgs84_path = None
             before_rgb_wgs84_path = None
             after_rgb_wgs84_path = None
-            
-            # Store target resolution for consistent reprojection
-            target_resolution_x = None
-            target_resolution_y = None
-            target_width = None
-            target_height = None
-            target_transform = None
             target_bounds = None
             
-            # First, save and reproject classification masks to establish the reference bounds
+            # Process data if we have UTM information
             if utm_crs is not None and utm_transform is not None:
-                # Define WGS84 as target CRS
-                dst_crs = 'EPSG:4326'  # WGS84
+                dst_crs = 'EPSG:4326'
                 
-                # Save before classification as georeferenced GeoTIFF in UTM
+                # Save and reproject before classification
                 before_class_utm_path = os.path.join(temp_dir, f"before_class_utm_{before_year}_{time.time()}.tif")
                 with rasterio.open(
                     before_class_utm_path, 'w',
@@ -1818,19 +1803,12 @@ with tab4:
                 ) as dst:
                     dst.write(binary_before, 1)
                 
-                # Reproject to WGS84 and get the bounds
+                # Reproject to WGS84
                 before_class_wgs84_path = os.path.join(temp_dir, f"before_class_wgs84_{before_year}_{time.time()}.tif")
                 with rasterio.open(before_class_utm_path) as src:
-                    # Calculate the ideal dimensions and transformation parameters
                     dst_transform, dst_width, dst_height = calculate_default_transform(
-                        src.crs, dst_crs, src.width, src.height, *src.bounds)
+                        src.crs, dst_crs, src.width, src.height, *utm_bounds)
                     
-                    # Store these values for consistent reprojection of all layers
-                    target_transform = dst_transform
-                    target_width = dst_width
-                    target_height = dst_height
-                    
-                    # Create the WGS84 version
                     dst_kwargs = src.meta.copy()
                     dst_kwargs.update({
                         'crs': dst_crs,
@@ -1849,10 +1827,10 @@ with tab4:
                             dst_crs=dst_crs,
                             resampling=Resampling.nearest
                         )
-                        # Get the bounds of the reprojected classification
                         target_bounds = dst.bounds
                 
-                # Save after classification as georeferenced GeoTIFF in UTM
+                # Process other layers with same transform
+                # After classification
                 after_class_utm_path = os.path.join(temp_dir, f"after_class_utm_{after_year}_{time.time()}.tif")
                 with rasterio.open(
                     after_class_utm_path, 'w',
@@ -1866,16 +1844,14 @@ with tab4:
                 ) as dst:
                     dst.write(binary_after, 1)
                 
-                # Reproject to WGS84
                 after_class_wgs84_path = os.path.join(temp_dir, f"after_class_wgs84_{after_year}_{time.time()}.tif")
                 with rasterio.open(after_class_utm_path) as src:
-                    # Use the same target dimensions and transform
                     dst_kwargs = src.meta.copy()
                     dst_kwargs.update({
                         'crs': dst_crs,
-                        'transform': target_transform,
-                        'width': target_width,
-                        'height': target_height
+                        'transform': dst_transform,
+                        'width': dst_width,
+                        'height': dst_height
                     })
                     
                     with rasterio.open(after_class_wgs84_path, 'w', **dst_kwargs) as dst:
@@ -1884,55 +1860,50 @@ with tab4:
                             destination=rasterio.band(dst, 1),
                             src_transform=src.transform,
                             src_crs=src.crs,
-                            dst_transform=target_transform,
+                            dst_transform=dst_transform,
                             dst_crs=dst_crs,
                             resampling=Resampling.nearest
                         )
                 
-                # Save change detection mask as georeferenced GeoTIFF in UTM
-                if "eroded_result" in st.session_state:
-                    change_mask_utm_path = os.path.join(temp_dir, f"change_mask_utm_{time.time()}.tif")
-                    with rasterio.open(
-                        change_mask_utm_path, 'w',
-                        driver='GTiff',
-                        height=st.session_state.eroded_result.shape[0],
-                        width=st.session_state.eroded_result.shape[1],
-                        count=1,
-                        dtype=st.session_state.eroded_result.dtype,
-                        crs=utm_crs,
-                        transform=utm_transform
-                    ) as dst:
-                        dst.write(st.session_state.eroded_result, 1)
-                    
-                    # Reproject to WGS84
-                    change_mask_wgs84_path = os.path.join(temp_dir, f"change_mask_wgs84_{time.time()}.tif")
-                    with rasterio.open(change_mask_utm_path) as src:
-                        # Use the same target dimensions and transform
-                        dst_kwargs = src.meta.copy()
-                        dst_kwargs.update({
-                            'crs': dst_crs,
-                            'transform': target_transform,
-                            'width': target_width,
-                            'height': target_height
-                        })
-                        
-                        with rasterio.open(change_mask_wgs84_path, 'w', **dst_kwargs) as dst:
-                            reproject(
-                                source=rasterio.band(src, 1),
-                                destination=rasterio.band(dst, 1),
-                                src_transform=src.transform,
-                                src_crs=src.crs,
-                                dst_transform=target_transform,
-                                dst_crs=dst_crs,
-                                resampling=Resampling.nearest
-                            )
+                # Change detection mask
+                change_mask_utm_path = os.path.join(temp_dir, f"change_mask_utm_{time.time()}.tif")
+                with rasterio.open(
+                    change_mask_utm_path, 'w',
+                    driver='GTiff',
+                    height=st.session_state.eroded_result.shape[0],
+                    width=st.session_state.eroded_result.shape[1],
+                    count=1,
+                    dtype=st.session_state.eroded_result.dtype,
+                    crs=utm_crs,
+                    transform=utm_transform
+                ) as dst:
+                    dst.write(st.session_state.eroded_result, 1)
                 
-                # Process and save Sentinel-2 images, clipping to classification bounds
-                if has_sentinel_data and target_bounds is not None:
-                    # Save Sentinel-2 images (first 4 bands) as GeoTIFF files
-                    before_sentinel_utm_path = os.path.join(temp_dir, f"before_sentinel_utm_{before_year}_{time.time()}.tif")
+                change_mask_wgs84_path = os.path.join(temp_dir, f"change_mask_wgs84_{time.time()}.tif")
+                with rasterio.open(change_mask_utm_path) as src:
+                    dst_kwargs = src.meta.copy()
+                    dst_kwargs.update({
+                        'crs': dst_crs,
+                        'transform': dst_transform,
+                        'width': dst_width,
+                        'height': dst_height
+                    })
                     
-                    # Get the first 4 bands (B, G, R, NIR)
+                    with rasterio.open(change_mask_wgs84_path, 'w', **dst_kwargs) as dst:
+                        reproject(
+                            source=rasterio.band(src, 1),
+                            destination=rasterio.band(dst, 1),
+                            src_transform=src.transform,
+                            src_crs=src.crs,
+                            dst_transform=dst_transform,
+                            dst_crs=dst_crs,
+                            resampling=Resampling.nearest
+                        )
+                
+                # Process Sentinel-2 images if available
+                if has_sentinel_data:
+                    # Before Sentinel-2
+                    before_sentinel_utm_path = os.path.join(temp_dir, f"before_sentinel_utm_{before_year}_{time.time()}.tif")
                     before_bands = st.session_state.clipped_img[:4, :, :]
                     
                     with rasterio.open(
@@ -1940,7 +1911,7 @@ with tab4:
                         driver='GTiff',
                         height=before_bands.shape[1],
                         width=before_bands.shape[2],
-                        count=4,  # 4 bands
+                        count=4,
                         dtype=before_bands.dtype,
                         crs=utm_crs,
                         transform=utm_transform
@@ -1948,34 +1919,48 @@ with tab4:
                         for i in range(4):
                             dst.write(before_bands[i], i+1)
                     
-                    # Reproject and clip Sentinel-2 before image to match classification bounds
-                    before_sentinel_wgs84_path = os.path.join(temp_dir, f"before_sentinel_wgs84_{before_year}_{time.time()}.tif")
+                    # Create RGB version
+                    before_rgb_wgs84_path = os.path.join(temp_dir, f"before_rgb_wgs84_{before_year}_{time.time()}.tif")
                     with rasterio.open(before_sentinel_utm_path) as src:
-                        # Create the WGS84 version with same bounds as classification
                         dst_kwargs = src.meta.copy()
                         dst_kwargs.update({
-                            'crs': 'EPSG:4326',
-                            'transform': target_transform,
-                            'width': target_width,
-                            'height': target_height
+                            'crs': dst_crs,
+                            'transform': dst_transform,
+                            'width': dst_width,
+                            'height': dst_height,
+                            'count': 3,
+                            'dtype': 'uint8'
                         })
                         
-                        with rasterio.open(before_sentinel_wgs84_path, 'w', **dst_kwargs) as dst:
-                            for i in range(1, 5):  # 4 bands
+                        with rasterio.open(before_rgb_wgs84_path, 'w', **dst_kwargs) as dst:
+                            for i, band_idx in enumerate([3, 2, 1]):  # R,G,B
+                                # Reproject each band
+                                temp_array = np.zeros((dst_height, dst_width), dtype=np.float32)
                                 reproject(
-                                    source=rasterio.band(src, i),
-                                    destination=rasterio.band(dst, i),
+                                    source=rasterio.band(src, band_idx),
+                                    destination=temp_array,
                                     src_transform=src.transform,
                                     src_crs=src.crs,
-                                    dst_transform=target_transform,
-                                    dst_crs='EPSG:4326',
-                                    resampling=Resampling.bilinear  # Use bilinear for smoother imagery
+                                    dst_transform=dst_transform,
+                                    dst_crs=dst_crs,
+                                    resampling=Resampling.bilinear
                                 )
+                                
+                                # Apply contrast stretch
+                                if np.any(temp_array > 0):
+                                    min_val = np.percentile(temp_array[temp_array > 0], 2)
+                                    max_val = np.percentile(temp_array[temp_array > 0], 98)
+                                    if max_val > min_val:
+                                        temp_array = np.clip((temp_array - min_val) / (max_val - min_val) * 255, 0, 255)
+                                    else:
+                                        temp_array = np.zeros_like(temp_array)
+                                else:
+                                    temp_array = np.zeros_like(temp_array)
+                                
+                                dst.write(temp_array.astype(np.uint8), i+1)
                     
-                    # Save Sentinel-2 after image (first 4 bands) as GeoTIFF
+                    # After Sentinel-2 (similar process)
                     after_sentinel_utm_path = os.path.join(temp_dir, f"after_sentinel_utm_{after_year}_{time.time()}.tif")
-                    
-                    # Get the first 4 bands (B, G, R, NIR)
                     after_bands = st.session_state.clipped_img_2024[:4, :, :]
                     
                     with rasterio.open(
@@ -1983,7 +1968,7 @@ with tab4:
                         driver='GTiff',
                         height=after_bands.shape[1],
                         width=after_bands.shape[2],
-                        count=4,  # 4 bands
+                        count=4,
                         dtype=after_bands.dtype,
                         crs=utm_crs,
                         transform=utm_transform
@@ -1991,241 +1976,80 @@ with tab4:
                         for i in range(4):
                             dst.write(after_bands[i], i+1)
                     
-                    # Reproject and clip Sentinel-2 after image to match classification bounds
-                    after_sentinel_wgs84_path = os.path.join(temp_dir, f"after_sentinel_wgs84_{after_year}_{time.time()}.tif")
+                    # Create RGB version
+                    after_rgb_wgs84_path = os.path.join(temp_dir, f"after_rgb_wgs84_{after_year}_{time.time()}.tif")
                     with rasterio.open(after_sentinel_utm_path) as src:
-                        # Use the same dimensions and transform as the classification
                         dst_kwargs = src.meta.copy()
                         dst_kwargs.update({
-                            'crs': 'EPSG:4326',
-                            'transform': target_transform,
-                            'width': target_width,
-                            'height': target_height
+                            'crs': dst_crs,
+                            'transform': dst_transform,
+                            'width': dst_width,
+                            'height': dst_height,
+                            'count': 3,
+                            'dtype': 'uint8'
                         })
                         
-                        with rasterio.open(after_sentinel_wgs84_path, 'w', **dst_kwargs) as dst:
-                            for i in range(1, 5):  # 4 bands
+                        with rasterio.open(after_rgb_wgs84_path, 'w', **dst_kwargs) as dst:
+                            for i, band_idx in enumerate([3, 2, 1]):  # R,G,B
+                                # Reproject each band
+                                temp_array = np.zeros((dst_height, dst_width), dtype=np.float32)
                                 reproject(
-                                    source=rasterio.band(src, i),
-                                    destination=rasterio.band(dst, i),
+                                    source=rasterio.band(src, band_idx),
+                                    destination=temp_array,
                                     src_transform=src.transform,
                                     src_crs=src.crs,
-                                    dst_transform=target_transform,
-                                    dst_crs='EPSG:4326',
-                                    resampling=Resampling.bilinear  # Use bilinear for smoother imagery
+                                    dst_transform=dst_transform,
+                                    dst_crs=dst_crs,
+                                    resampling=Resampling.bilinear
                                 )
-                    
-                    # Create RGB GeoTIFFs for folium display with exact same bounds
-                    before_rgb_wgs84_path = os.path.join(temp_dir, f"before_rgb_wgs84_{before_year}_{time.time()}.tif")
-                    with rasterio.open(before_sentinel_wgs84_path) as src:
-                        profile = src.profile.copy()
-                        profile.update(count=3, dtype='uint8')  # RGB has 3 bands, ensure uint8
-                        with rasterio.open(before_rgb_wgs84_path, 'w', **profile) as dst:
-                            # Use bands 3,2,1 (R,G,B) from the 4-band image
-                            rgb_data = np.zeros((3, src.height, src.width), dtype=np.uint8)
-                            for i, band_idx in enumerate([3, 2, 1]):  # R,G,B bands
-                                band_data = src.read(band_idx)
-                                # Simple contrast stretch
-                                min_val = np.percentile(band_data[band_data > 0], 2) if np.any(band_data > 0) else 0
-                                max_val = np.percentile(band_data[band_data > 0], 98) if np.any(band_data > 0) else 1
-                                if max_val > min_val:
-                                    rgb_data[i] = np.clip((band_data - min_val) / (max_val - min_val) * 255, 0, 255).astype(np.uint8)
+                                
+                                # Apply contrast stretch
+                                if np.any(temp_array > 0):
+                                    min_val = np.percentile(temp_array[temp_array > 0], 2)
+                                    max_val = np.percentile(temp_array[temp_array > 0], 98)
+                                    if max_val > min_val:
+                                        temp_array = np.clip((temp_array - min_val) / (max_val - min_val) * 255, 0, 255)
+                                    else:
+                                        temp_array = np.zeros_like(temp_array)
                                 else:
-                                    rgb_data[i] = np.zeros_like(band_data, dtype=np.uint8)
-                            dst.write(rgb_data)
-                    
-                    after_rgb_wgs84_path = os.path.join(temp_dir, f"after_rgb_wgs84_{after_year}_{time.time()}.tif")
-                    with rasterio.open(after_sentinel_wgs84_path) as src:
-                        profile = src.profile.copy()
-                        profile.update(count=3, dtype='uint8')  # RGB has 3 bands, ensure uint8
-                        with rasterio.open(after_rgb_wgs84_path, 'w', **profile) as dst:
-                            # Use bands 3,2,1 (R,G,B) from the 4-band image
-                            rgb_data = np.zeros((3, src.height, src.width), dtype=np.uint8)
-                            for i, band_idx in enumerate([3, 2, 1]):  # R,G,B bands
-                                band_data = src.read(band_idx)
-                                # Simple contrast stretch
-                                min_val = np.percentile(band_data[band_data > 0], 2) if np.any(band_data > 0) else 0
-                                max_val = np.percentile(band_data[band_data > 0], 98) if np.any(band_data > 0) else 1
-                                if max_val > min_val:
-                                    rgb_data[i] = np.clip((band_data - min_val) / (max_val - min_val) * 255, 0, 255).astype(np.uint8)
-                                else:
-                                    rgb_data[i] = np.zeros_like(band_data, dtype=np.uint8)
-                            dst.write(rgb_data)
-                
-                # Add download buttons for classification maps only
-                st.subheader("Download Reprojected Data")
-                st.write("The following files have been reprojected from UTM to WGS84 coordinate system:")
-                
-                # Download buttons for classification maps
-                col1, col2, col3 = st.columns(3)
-                
-                with col1:
-                    if before_class_wgs84_path:
-                        with open(before_class_wgs84_path, "rb") as file:
-                            btn = st.download_button(
-                                label=f"Download {before_year} Classification",
-                                data=file,
-                                file_name=f"before_classification_{before_year}_wgs84.tif",
-                                mime="image/tiff",
-                                key=f"download_before_class_{before_year}"
-                            )
-                
-                with col2:
-                    if after_class_wgs84_path:
-                        with open(after_class_wgs84_path, "rb") as file:
-                            btn = st.download_button(
-                                label=f"Download {after_year} Classification",
-                                data=file,
-                                file_name=f"after_classification_{after_year}_wgs84.tif",
-                                mime="image/tiff",
-                                key=f"download_after_class_{after_year}"
-                            )
-                
-                with col3:
-                    if change_mask_wgs84_path:
-                        with open(change_mask_wgs84_path, "rb") as file:
-                            btn = st.download_button(
-                                label="Download Change Mask",
-                                data=file,
-                                file_name=f"change_mask_{before_year}_{after_year}_wgs84.tif",
-                                mime="image/tiff",
-                                key="download_change_mask"
-                            )
-            else:
-                # Fallback to simple PNG files if no georeference data is available
-                st.warning("No UTM coordinate information found. Files are not properly georeferenced.")
-                
-                # Add download buttons for PNG files (not reprojected)
-                st.subheader("Download Data")
-                st.write("Note: These files are not georeferenced as UTM coordinate information was not available.")
-                
-                # Classification maps
-                col1, col2, col3 = st.columns(3)
-                
-                with col1:
-                    # Create a PIL image and save it to a bytes buffer
-                    img = Image.fromarray((binary_before * 255).astype(np.uint8))
-                    buf = io.BytesIO()
-                    img.save(buf, format="PNG")
-                    
-                    btn = st.download_button(
-                        label=f"Download {before_year} Classification",
-                        data=buf.getvalue(),
-                        file_name=f"before_classification_{before_year}.png",
-                        mime="image/png",
-                        key=f"download_before_class_png_{before_year}"
-                    )
-                
-                with col2:
-                    # Create a PIL image and save it to a bytes buffer
-                    img = Image.fromarray((binary_after * 255).astype(np.uint8))
-                    buf = io.BytesIO()
-                    img.save(buf, format="PNG")
-                    
-                    btn = st.download_button(
-                        label=f"Download {after_year} Classification",
-                        data=buf.getvalue(),
-                        file_name=f"after_classification_{after_year}.png",
-                        mime="image/png",
-                        key=f"download_after_class_png_{after_year}"
-                    )
-                
-                with col3:
-                    # Create a PIL image and save it to a bytes buffer
-                    img = Image.fromarray(st.session_state.eroded_result)
-                    buf = io.BytesIO()
-                    img.save(buf, format="PNG")
-                    
-                    btn = st.download_button(
-                        label="Download Change Mask",
-                        data=buf.getvalue(),
-                        file_name=f"change_mask_{before_year}_{after_year}.png",
-                        mime="image/png",
-                        key="download_change_mask_png"
-                    )
+                                    temp_array = np.zeros_like(temp_array)
+                                
+                                dst.write(temp_array.astype(np.uint8), i+1)
             
-            # Function to convert raster to image overlay for folium with proper transparency handling
-            def raster_to_folium_overlay(raster_path, colormap='viridis', opacity=0.7, is_binary=False):
-                """Convert a raster file to a folium image overlay with proper transparency"""
+            # Function to convert raster to image overlay
+            def raster_to_folium_overlay(raster_path, colormap='viridis', is_binary=False):
                 with rasterio.open(raster_path) as src:
-                    # Read the data
-                    data = src.read(1)  # Read first band
-                    
-                    # Get bounds in lat/lon
+                    data = src.read(1) if src.count == 1 else src.read([1, 2, 3])
                     bounds = src.bounds
                     bounds_latlon = [[bounds.bottom, bounds.left], [bounds.top, bounds.right]]
                     
-                    # Handle binary classification data specially
                     if is_binary:
-                        # Create RGBA image for binary data
                         rgba_array = np.zeros((data.shape[0], data.shape[1], 4), dtype=np.uint8)
-                        
                         if colormap == 'Greens':
-                            # Green for buildings (value = 1), transparent for non-buildings (value = 0)
                             mask = data == 1
-                            rgba_array[mask, 0] = 0      # Red
-                            rgba_array[mask, 1] = 255    # Green
-                            rgba_array[mask, 2] = 0      # Blue
-                            rgba_array[mask, 3] = 180    # Alpha (transparency)
-                            
+                            rgba_array[mask] = [0, 255, 0, 180]
                         elif colormap == 'Reds':
-                            # Red for buildings (value = 1), transparent for non-buildings (value = 0)
                             mask = data == 1
-                            rgba_array[mask, 0] = 255    # Red
-                            rgba_array[mask, 1] = 0      # Green
-                            rgba_array[mask, 2] = 0      # Blue
-                            rgba_array[mask, 3] = 180    # Alpha (transparency)
-                        
-                        # Convert to PIL Image
+                            rgba_array[mask] = [255, 0, 0, 180]
                         pil_img = Image.fromarray(rgba_array, 'RGBA')
                     
                     elif colormap == 'hot' and data.max() > 1:
-                        # For change detection mask (values 0-255)
-                        import matplotlib.pyplot as plt
                         import matplotlib.cm as cm
-                        
-                        # Normalize data
                         data_norm = data / 255.0
-                        
-                        # Apply hot colormap
                         cmap = cm.hot
                         rgba_array = cmap(data_norm)
-                        
-                        # Set transparency for zero values
-                        rgba_array[data == 0, 3] = 0  # Fully transparent for zero values
-                        rgba_array[data > 0, 3] = 0.8  # Semi-transparent for non-zero values
-                        
-                        # Convert to uint8
+                        rgba_array[data == 0, 3] = 0
+                        rgba_array[data > 0, 3] = 0.8
                         rgba_array = (rgba_array * 255).astype(np.uint8)
-                        
-                        # Convert to PIL Image
                         pil_img = Image.fromarray(rgba_array, 'RGBA')
                     
                     else:
-                        # For RGB Sentinel-2 images
-                        if src.count == 3:  # RGB
-                            rgb_data = src.read([1, 2, 3])
-                            img_array = np.transpose(rgb_data, (1, 2, 0))
+                        if len(data.shape) == 3:  # RGB
+                            img_array = np.transpose(data, (1, 2, 0))
                             pil_img = Image.fromarray(img_array)
                         else:
-                            # Single band - apply colormap
-                            import matplotlib.pyplot as plt
-                            import matplotlib.cm as cm
-                            
-                            # Normalize data
-                            data_min, data_max = np.nanmin(data), np.nanmax(data)
-                            if data_max > data_min:
-                                data_norm = (data - data_min) / (data_max - data_min)
-                            else:
-                                data_norm = np.zeros_like(data)
-                            
-                            # Apply colormap
-                            cmap = cm.viridis
-                            img_array = cmap(data_norm)
-                            img_array = (img_array[:, :, :3] * 255).astype(np.uint8)
-                            pil_img = Image.fromarray(img_array)
+                            pil_img = Image.fromarray(data)
                     
-                    # Convert to base64 for folium
                     img_buffer = io.BytesIO()
                     pil_img.save(img_buffer, format='PNG')
                     img_str = base64.b64encode(img_buffer.getvalue()).decode()
@@ -2236,7 +2060,7 @@ with tab4:
             m = folium.Map(
                 location=center,
                 zoom_start=15,
-                tiles=None  # We'll add tiles manually
+                tiles=None
             )
             
             # Add fullscreen button
@@ -2247,7 +2071,7 @@ with tab4:
                 force_separate_button=True
             ).add_to(m)
             
-            # Add base layers
+            # Add base layers including None option
             folium.TileLayer(
                 tiles='https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}',
                 attr='Google Satellite',
@@ -2264,7 +2088,6 @@ with tab4:
                 control=True
             ).add_to(m)
             
-            # Add OpenStreetMap as default
             folium.TileLayer(
                 tiles='OpenStreetMap',
                 name='OpenStreetMap',
@@ -2272,15 +2095,23 @@ with tab4:
                 control=True
             ).add_to(m)
             
-            # Add GeoTIFF layers with proper georeferencing
+            # Add None/White background option
+            folium.TileLayer(
+                tiles='',
+                name='None',
+                overlay=False,
+                control=True,
+                attr=''
+            ).add_to(m)
+            
+            # Add data layers
+            layer_ids = []
+            
             if utm_crs is not None and utm_transform is not None:
-                # Add drawn polygon to the map
-                if selected_polygon and 'region_number' in st.session_state:
-                    # Create a GeoDataFrame from the polygon
+                # Add polygon
+                if selected_polygon:
                     gdf = gpd.GeoDataFrame(geometry=[selected_polygon])
-                    gdf.crs = "EPSG:4326"  # Set the CRS to WGS84
-                    
-                    # Convert to GeoJSON and add to map
+                    gdf.crs = "EPSG:4326"
                     folium.GeoJson(
                         gdf.to_json(),
                         name="Selected Region",
@@ -2292,106 +2123,210 @@ with tab4:
                         }
                     ).add_to(m)
                 
-                # Add Sentinel-2 RGB images if available (these should now align perfectly)
+                # Add Sentinel-2 layers
                 if has_sentinel_data and before_rgb_wgs84_path and after_rgb_wgs84_path:
                     try:
-                        # Before Sentinel-2 RGB
-                        img_data, bounds = raster_to_folium_overlay(before_rgb_wgs84_path, opacity=0.8)
-                        folium.raster_layers.ImageOverlay(
+                        img_data, bounds = raster_to_folium_overlay(before_rgb_wgs84_path)
+                        layer = folium.raster_layers.ImageOverlay(
                             image=img_data,
                             bounds=bounds,
                             opacity=0.8,
                             name=f"Before Sentinel-2 ({before_year})"
-                        ).add_to(m)
+                        )
+                        layer.add_to(m)
+                        layer_ids.append(f"before_sentinel_{before_year}")
                         
-                        # After Sentinel-2 RGB
-                        img_data, bounds = raster_to_folium_overlay(after_rgb_wgs84_path, opacity=0.8)
-                        folium.raster_layers.ImageOverlay(
+                        img_data, bounds = raster_to_folium_overlay(after_rgb_wgs84_path)
+                        layer = folium.raster_layers.ImageOverlay(
                             image=img_data,
                             bounds=bounds,
                             opacity=0.8,
                             name=f"After Sentinel-2 ({after_year})"
-                        ).add_to(m)
+                        )
+                        layer.add_to(m)
+                        layer_ids.append(f"after_sentinel_{after_year}")
                     except Exception as e:
-                        st.warning(f"Could not add Sentinel-2 RGB layers: {str(e)}")
+                        st.warning(f"Could not add Sentinel-2 layers: {str(e)}")
                 
-                # Add classification layers with binary handling
+                # Add classification layers
                 if before_class_wgs84_path:
                     try:
                         img_data, bounds = raster_to_folium_overlay(
-                            before_class_wgs84_path, 
-                            colormap='Greens', 
-                            opacity=0.7, 
-                            is_binary=True
-                        )
-                        folium.raster_layers.ImageOverlay(
+                            before_class_wgs84_path, colormap='Greens', is_binary=True)
+                        layer = folium.raster_layers.ImageOverlay(
                             image=img_data,
                             bounds=bounds,
-                            opacity=1.0,  # Use full opacity since transparency is handled in the image
+                            opacity=1.0,
                             name=f"Before Classification ({before_year})"
-                        ).add_to(m)
+                        )
+                        layer.add_to(m)
+                        layer_ids.append(f"before_class_{before_year}")
                     except Exception as e:
-                        st.warning(f"Could not add before classification layer: {str(e)}")
+                        st.warning(f"Could not add before classification: {str(e)}")
                 
                 if after_class_wgs84_path:
                     try:
                         img_data, bounds = raster_to_folium_overlay(
-                            after_class_wgs84_path, 
-                            colormap='Reds', 
-                            opacity=0.7, 
-                            is_binary=True
-                        )
-                        folium.raster_layers.ImageOverlay(
+                            after_class_wgs84_path, colormap='Reds', is_binary=True)
+                        layer = folium.raster_layers.ImageOverlay(
                             image=img_data,
                             bounds=bounds,
-                            opacity=1.0,  # Use full opacity since transparency is handled in the image
+                            opacity=1.0,
                             name=f"After Classification ({after_year})"
-                        ).add_to(m)
+                        )
+                        layer.add_to(m)
+                        layer_ids.append(f"after_class_{after_year}")
                     except Exception as e:
-                        st.warning(f"Could not add after classification layer: {str(e)}")
+                        st.warning(f"Could not add after classification: {str(e)}")
                 
                 # Add change detection mask
                 if change_mask_wgs84_path:
                     try:
                         img_data, bounds = raster_to_folium_overlay(
-                            change_mask_wgs84_path, 
-                            colormap='hot', 
-                            opacity=0.7
-                        )
-                        folium.raster_layers.ImageOverlay(
+                            change_mask_wgs84_path, colormap='hot')
+                        layer = folium.raster_layers.ImageOverlay(
                             image=img_data,
                             bounds=bounds,
-                            opacity=1.0,  # Use full opacity since transparency is handled in the image
-                            name=f"Change Detection Mask ({before_year}-{after_year})"
-                        ).add_to(m)
+                            opacity=1.0,
+                            name=f"Change Detection ({before_year}-{after_year})"
+                        )
+                        layer.add_to(m)
+                        layer_ids.append(f"change_mask_{before_year}_{after_year}")
                     except Exception as e:
-                        st.warning(f"Could not add change detection mask layer: {str(e)}")
+                        st.warning(f"Could not add change detection mask: {str(e)}")
                 
-                # Fit map to the bounds of the data
+                # Fit map to bounds
                 if target_bounds:
                     m.fit_bounds([[target_bounds.bottom, target_bounds.left], 
                                   [target_bounds.top, target_bounds.right]])
             
-            else:
-                # Fallback for non-georeferenced data
-                st.warning("Cannot display non-georeferenced data in the interactive map.")
-            
             # Add layer control
             folium.LayerControl().add_to(m)
             
-            # Display the map in Streamlit
+            # Add custom CSS and JavaScript for inline opacity controls
+            opacity_control_html = f"""
+            <style>
+            .opacity-slider {{
+                width: 60px !important;
+                height: 15px !important;
+                margin-left: 5px !important;
+                vertical-align: middle !important;
+            }}
+            .leaflet-control-layers-overlays label {{
+                display: flex !important;
+                align-items: center !important;
+                justify-content: space-between !important;
+                padding: 2px 5px !important;
+            }}
+            .leaflet-control-layers-overlays input[type="checkbox"] {{
+                margin-right: 5px !important;
+            }}
+            </style>
+            
+            <script>
+            document.addEventListener('DOMContentLoaded', function() {{
+                setTimeout(function() {{
+                    // Find all overlay labels
+                    var overlayLabels = document.querySelectorAll('.leaflet-control-layers-overlays label');
+                    
+                    overlayLabels.forEach(function(label, index) {{
+                        var span = label.querySelector('span');
+                        if (span) {{
+                            var layerName = span.textContent.trim();
+                            
+                            // Only add sliders to data layers (not Selected Region)
+                            if (layerName.includes('Sentinel-2') || layerName.includes('Classification') || layerName.includes('Change Detection')) {{
+                                
+                                // Create slider container
+                                var sliderContainer = document.createElement('div');
+                                sliderContainer.style.display = 'flex';
+                                sliderContainer.style.alignItems = 'center';
+                                sliderContainer.style.marginLeft = 'auto';
+                                
+                                // Create opacity slider
+                                var slider = document.createElement('input');
+                                slider.type = 'range';
+                                slider.min = '0';
+                                slider.max = '100';
+                                slider.value = '80';
+                                slider.className = 'opacity-slider';
+                                slider.title = 'Adjust opacity';
+                                
+                                // Create percentage display
+                                var percentDisplay = document.createElement('span');
+                                percentDisplay.textContent = '80%';
+                                percentDisplay.style.fontSize = '10px';
+                                percentDisplay.style.marginLeft = '3px';
+                                percentDisplay.style.minWidth = '25px';
+                                
+                                // Add event listener to slider
+                                slider.addEventListener('input', function() {{
+                                    var opacity = this.value / 100;
+                                    percentDisplay.textContent = this.value + '%';
+                                    
+                                    // Find the corresponding layer and update opacity
+                                    var checkbox = label.querySelector('input[type="checkbox"]');
+                                    if (checkbox && checkbox.checked) {{
+                                        // Get all image overlays
+                                        window.map.eachLayer(function(layer) {{
+                                            if (layer.options && layer.options.name === layerName) {{
+                                                if (layer.setOpacity) {{
+                                                    layer.setOpacity(opacity);
+                                                }}
+                                            }}
+                                        }});
+                                    }}
+                                }});
+                                
+                                // Add checkbox event listener to sync opacity when layer is toggled
+                                var checkbox = label.querySelector('input[type="checkbox"]');
+                                if (checkbox) {{
+                                    checkbox.addEventListener('change', function() {{
+                                        if (this.checked) {{
+                                            var opacity = slider.value / 100;
+                                            setTimeout(function() {{
+                                                window.map.eachLayer(function(layer) {{
+                                                    if (layer.options && layer.options.name === layerName) {{
+                                                        if (layer.setOpacity) {{
+                                                            layer.setOpacity(opacity);
+                                                        }}
+                                                    }}
+                                                }});
+                                            }}, 100);
+                                        }}
+                                    }});
+                                }}
+                                
+                                sliderContainer.appendChild(slider);
+                                sliderContainer.appendChild(percentDisplay);
+                                label.appendChild(sliderContainer);
+                            }}
+                        }}
+                    }});
+                }}, 1000);
+            }});
+            </script>
+            """
+            
+            # Add the custom HTML to the map
+            m.get_root().html.add_child(folium.Element(opacity_control_html))
+            
+            # Display the map
             st_folium_data = st_folium(m, width=700, height=500)
             
-            # Add explanation for the interactive map
+            # Add explanation
             st.info("""
-            **Interactive Map Usage (Folium):**
-            - Click the **fullscreen button** (top-left) to view the map in fullscreen mode
-            - Use the layer control in the top-right to toggle layers on/off
-            - Switch between Google Satellite, Google Maps, and OpenStreetMap base layers
-            - The map shows before classification in **green** and after classification in **red**
-            - Change detection mask shows new buildings in **hot colors** (red/yellow)
-            - All layers are now perfectly aligned with the same extent
-            - Click on the map to explore different areas
+            **Interactive Map Features:**
+            - **Fullscreen**: Click the fullscreen button (top-left) to expand the map
+            - **Base Layers**: Switch between Google Satellite, Google Maps, OpenStreetMap, or None (white background)
+            - **Layer Control**: Toggle layers on/off using checkboxes
+            - **Opacity Control**: Adjust transparency using the sliders next to each layer name
+            - **Color Coding**: 
+              - Before classification: **Green**
+              - After classification: **Red** 
+              - Change detection: **Hot colors** (red/yellow)
+              - Selected region: **Red outline**
+            - All layers are perfectly aligned and clipped to the same extent
             """)
             
         except Exception as e:
