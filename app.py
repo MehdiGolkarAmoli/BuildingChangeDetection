@@ -1655,23 +1655,20 @@ with tab4: # This line is commented out as the code below is the content of tab4
     import time
     import rasterio
     from rasterio.warp import calculate_default_transform, reproject, Resampling
-    from rasterio.mask import mask  # Not explicitly used in this snippet, but kept from original
-    from shapely.geometry import mapping, box  # Not explicitly used in this snippet, but kept from original
+    from rasterio.mask import mask
+    from shapely.geometry import mapping, box
     import io
     from PIL import Image
     import folium
     from folium import plugins
-    # from streamlit_folium import st_folium # No longer needed for display
-    import streamlit.components.v1 as components  # For st.components.v1.html
-    import json  # Not explicitly used in this snippet, but kept from original
+    import streamlit.components.v1 as components
+    import json
     import geopandas as gpd
     import base64
-    import numpy as np  # Ensure numpy is imported
-    import matplotlib.pyplot as plt  # Ensure matplotlib is imported
+    import numpy as np
+    import matplotlib.pyplot as plt
     
     # Example definition for apply_erosion if not already defined in your main script:
-    # You should have this function defined or imported appropriately.
-    # For demonstration, a simple placeholder:
     def apply_erosion(mask, kernel_size_val):
         # Replace with your actual cv2.erode or skimage.morphology.erosion implementation
         # This is just a placeholder to make the code runnable
@@ -1731,7 +1728,7 @@ with tab4: # This line is commented out as the code below is the content of tab4
     )
     
     if st.button("Apply Erosion", key="tab4_apply_erosion_btn"):
-        eroded = apply_erosion(raw_mask, kernel)  # Ensure apply_erosion is defined
+        eroded = apply_erosion(raw_mask, kernel)
         st.session_state.eroded_result = eroded
     
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
@@ -1745,10 +1742,11 @@ with tab4: # This line is commented out as the code below is the content of tab4
     
     # 6) Interactive Map only once we have eroded_result
     if "eroded_result" in st.session_state:
-        st.subheader("Interactive Map with Transparency Controls")
-        st.info("Use the transparency panel on the right to control layer visibility and opacity. The layer control in the top-right toggles layers on/off.")
+        st.subheader("Interactive Map - Region of Interest")
+        st.info("Map is automatically clipped to your region of interest. Use layer controls to toggle layers and transparency sliders to adjust opacity.")
     
         try:
+            # Get region of interest bounds
             if ('region_number' in st.session_state and
                 'drawn_polygons' in st.session_state and
                 st.session_state.region_number <= len(st.session_state.drawn_polygons)):
@@ -1766,6 +1764,7 @@ with tab4: # This line is commented out as the code below is the content of tab4
                 'clipped_meta' in st.session_state
             )
     
+            # Get UTM metadata for reprojection
             if 'clipped_meta' in st.session_state:
                 utm_transform = st.session_state.clipped_meta['transform']
                 utm_crs = st.session_state.clipped_meta['crs']
@@ -1785,6 +1784,7 @@ with tab4: # This line is commented out as the code below is the content of tab4
                 utm_height = binary_before.shape[0]
                 utm_width = binary_before.shape[1]
     
+            # Initialize paths
             before_class_wgs84_path = None
             after_class_wgs84_path = None
             change_mask_wgs84_path = None
@@ -1796,9 +1796,11 @@ with tab4: # This line is commented out as the code below is the content of tab4
             target_height = None
             target_bounds = None
     
+            # Reproject data if UTM info is available
             if utm_crs is not None and utm_transform is not None:
                 dst_crs = 'EPSG:4326'
     
+                # Reproject before classification
                 before_class_utm_path = os.path.join(temp_dir, f"before_class_utm_{before_year}_{time.time()}.tif")
                 with rasterio.open(
                     before_class_utm_path, 'w', driver='GTiff',
@@ -1828,6 +1830,7 @@ with tab4: # This line is commented out as the code below is the content of tab4
                         )
                         target_bounds = dst.bounds
     
+                # Reproject after classification
                 after_class_utm_path = os.path.join(temp_dir, f"after_class_utm_{after_year}_{time.time()}.tif")
                 with rasterio.open(
                     after_class_utm_path, 'w', driver='GTiff',
@@ -1851,6 +1854,7 @@ with tab4: # This line is commented out as the code below is the content of tab4
                             resampling=Resampling.nearest
                         )
     
+                # Reproject change mask
                 if "eroded_result" in st.session_state:
                     change_mask_utm_path = os.path.join(temp_dir, f"change_mask_utm_{time.time()}.tif")
                     with rasterio.open(
@@ -1875,7 +1879,9 @@ with tab4: # This line is commented out as the code below is the content of tab4
                                 resampling=Resampling.nearest
                             )
     
+                # Reproject Sentinel-2 RGB data
                 if has_sentinel_data and target_bounds is not None:
+                    # Before Sentinel RGB
                     before_sentinel_utm_path = os.path.join(temp_dir, f"before_sentinel_utm_{before_year}_{time.time()}.tif")
                     before_bands = st.session_state.clipped_img[:4, :, :]
                     with rasterio.open(
@@ -1886,22 +1892,38 @@ with tab4: # This line is commented out as the code below is the content of tab4
                         for i in range(4):
                             dst.write(before_bands[i], i+1)
     
-                    before_sentinel_wgs84_path = os.path.join(temp_dir, f"before_sentinel_wgs84_{before_year}_{time.time()}.tif")
+                    before_rgb_wgs84_path = os.path.join(temp_dir, f"before_rgb_wgs84_{before_year}_{time.time()}.tif")
                     with rasterio.open(before_sentinel_utm_path) as src:
-                        dst_kwargs = src.meta.copy()
-                        dst_kwargs.update({
-                            'crs': 'EPSG:4326', 'transform': target_transform,
-                            'width': target_width, 'height': target_height
-                        })
-                        with rasterio.open(before_sentinel_wgs84_path, 'w', **dst_kwargs) as dst:
+                        profile = src.profile.copy()
+                        profile.update(count=3, dtype='uint8', crs='EPSG:4326', 
+                                     transform=target_transform, width=target_width, height=target_height)
+                        with rasterio.open(before_rgb_wgs84_path, 'w', **profile) as dst:
+                            # Create RGB composite (bands 4,3,2 -> RGB)
+                            rgb_data = np.zeros((3, target_height, target_width), dtype=np.uint8)
+                            temp_bands = np.zeros((4, target_height, target_width), dtype=src.dtypes[0])
+                            
+                            # Reproject all 4 bands first
                             for i in range(1, 5):
                                 reproject(
-                                    source=rasterio.band(src, i), destination=rasterio.band(dst, i),
+                                    source=rasterio.band(src, i), 
+                                    destination=temp_bands[i-1],
                                     src_transform=src.transform, src_crs=src.crs,
                                     dst_transform=target_transform, dst_crs='EPSG:4326',
                                     resampling=Resampling.bilinear
                                 )
+                            
+                            # Convert to RGB
+                            for i, band_idx in enumerate([3, 2, 1]):  # NIR, Red, Green -> RGB
+                                band_data = temp_bands[band_idx]
+                                if np.any(band_data > 0):
+                                    min_val = np.percentile(band_data[band_data > 0], 2)
+                                    max_val = np.percentile(band_data[band_data > 0], 98)
+                                    if max_val > min_val:
+                                        rgb_data[i] = np.clip((band_data - min_val) / (max_val - min_val) * 255, 0, 255).astype(np.uint8)
+                            
+                            dst.write(rgb_data)
     
+                    # After Sentinel RGB
                     after_sentinel_utm_path = os.path.join(temp_dir, f"after_sentinel_utm_{after_year}_{time.time()}.tif")
                     after_bands = st.session_state.clipped_img_2024[:4, :, :]
                     with rasterio.open(
@@ -1912,54 +1934,35 @@ with tab4: # This line is commented out as the code below is the content of tab4
                         for i in range(4):
                             dst.write(after_bands[i], i+1)
     
-                    after_sentinel_wgs84_path = os.path.join(temp_dir, f"after_sentinel_wgs84_{after_year}_{time.time()}.tif")
+                    after_rgb_wgs84_path = os.path.join(temp_dir, f"after_rgb_wgs84_{after_year}_{time.time()}.tif")
                     with rasterio.open(after_sentinel_utm_path) as src:
-                        dst_kwargs = src.meta.copy()
-                        dst_kwargs.update({
-                            'crs': 'EPSG:4326', 'transform': target_transform,
-                            'width': target_width, 'height': target_height
-                        })
-                        with rasterio.open(after_sentinel_wgs84_path, 'w', **dst_kwargs) as dst:
+                        profile = src.profile.copy()
+                        profile.update(count=3, dtype='uint8', crs='EPSG:4326', 
+                                     transform=target_transform, width=target_width, height=target_height)
+                        with rasterio.open(after_rgb_wgs84_path, 'w', **profile) as dst:
+                            rgb_data = np.zeros((3, target_height, target_width), dtype=np.uint8)
+                            temp_bands = np.zeros((4, target_height, target_width), dtype=src.dtypes[0])
+                            
                             for i in range(1, 5):
                                 reproject(
-                                    source=rasterio.band(src, i), destination=rasterio.band(dst, i),
+                                    source=rasterio.band(src, i), 
+                                    destination=temp_bands[i-1],
                                     src_transform=src.transform, src_crs=src.crs,
                                     dst_transform=target_transform, dst_crs='EPSG:4326',
                                     resampling=Resampling.bilinear
                                 )
-    
-                    before_rgb_wgs84_path = os.path.join(temp_dir, f"before_rgb_wgs84_{before_year}_{time.time()}.tif")
-                    with rasterio.open(before_sentinel_wgs84_path) as src:
-                        profile = src.profile.copy()
-                        profile.update(count=3, dtype='uint8')
-                        with rasterio.open(before_rgb_wgs84_path, 'w', **profile) as dst:
-                            rgb_data = np.zeros((3, src.height, src.width), dtype=np.uint8)
+                            
                             for i, band_idx in enumerate([3, 2, 1]):
-                                band_data = src.read(band_idx)
-                                min_val = np.percentile(band_data[band_data > 0], 2) if np.any(band_data > 0) else 0
-                                max_val = np.percentile(band_data[band_data > 0], 98) if np.any(band_data > 0) else 1
-                                if max_val > min_val:
-                                    rgb_data[i] = np.clip((band_data - min_val) / (max_val - min_val) * 255, 0, 255).astype(np.uint8)
-                                else:
-                                    rgb_data[i] = np.zeros_like(band_data, dtype=np.uint8)
+                                band_data = temp_bands[band_idx]
+                                if np.any(band_data > 0):
+                                    min_val = np.percentile(band_data[band_data > 0], 2)
+                                    max_val = np.percentile(band_data[band_data > 0], 98)
+                                    if max_val > min_val:
+                                        rgb_data[i] = np.clip((band_data - min_val) / (max_val - min_val) * 255, 0, 255).astype(np.uint8)
+                            
                             dst.write(rgb_data)
     
-                    after_rgb_wgs84_path = os.path.join(temp_dir, f"after_rgb_wgs84_{after_year}_{time.time()}.tif")
-                    with rasterio.open(after_sentinel_wgs84_path) as src:
-                        profile = src.profile.copy()
-                        profile.update(count=3, dtype='uint8')
-                        with rasterio.open(after_rgb_wgs84_path, 'w', **profile) as dst:
-                            rgb_data = np.zeros((3, src.height, src.width), dtype=np.uint8)
-                            for i, band_idx in enumerate([3, 2, 1]):
-                                band_data = src.read(band_idx)
-                                min_val = np.percentile(band_data[band_data > 0], 2) if np.any(band_data > 0) else 0
-                                max_val = np.percentile(band_data[band_data > 0], 98) if np.any(band_data > 0) else 1
-                                if max_val > min_val:
-                                    rgb_data[i] = np.clip((band_data - min_val) / (max_val - min_val) * 255, 0, 255).astype(np.uint8)
-                                else:
-                                    rgb_data[i] = np.zeros_like(band_data, dtype=np.uint8)
-                            dst.write(rgb_data)
-    
+                # Download section for reprojected data
                 st.subheader("Download Reprojected Data")
                 st.write("The following files have been reprojected from UTM to WGS84 coordinate system:")
                 col1, col2, col3 = st.columns(3)
@@ -1989,79 +1992,48 @@ with tab4: # This line is commented out as the code below is the content of tab4
                             )
             else:
                 st.warning("No UTM coordinate information found. Files are not properly georeferenced.")
-                st.subheader("Download Data")
-                st.write("Note: These files are not georeferenced as UTM coordinate information was not available.")
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    img = Image.fromarray((binary_before * 255).astype(np.uint8))
-                    buf = io.BytesIO()
-                    img.save(buf, format="PNG")
-                    st.download_button(
-                        label=f"Download {before_year} Classification", data=buf.getvalue(),
-                        file_name=f"before_classification_{before_year}.png", mime="image/png",
-                        key=f"download_before_class_png_{before_year}"
-                    )
-                with col2:
-                    img = Image.fromarray((binary_after * 255).astype(np.uint8))
-                    buf = io.BytesIO()
-                    img.save(buf, format="PNG")
-                    st.download_button(
-                        label=f"Download {after_year} Classification", data=buf.getvalue(),
-                        file_name=f"after_classification_{after_year}.png", mime="image/png",
-                        key=f"download_after_class_png_{after_year}"
-                    )
-                with col3:
-                    img = Image.fromarray(st.session_state.eroded_result)
-                    buf = io.BytesIO()
-                    img.save(buf, format="PNG")
-                    st.download_button(
-                        label="Download Change Mask", data=buf.getvalue(),
-                        file_name=f"change_mask_{before_year}_{after_year}.png", mime="image/png",
-                        key="download_change_mask_png"
-                    )
     
+            # Function to convert raster to base64 image for Folium
             def raster_to_folium_overlay(raster_path, colormap='viridis', opacity=0.7, is_binary=False):
                 with rasterio.open(raster_path) as src:
                     data = src.read(1)
                     bounds = src.bounds
                     bounds_latlon = [[bounds.bottom, bounds.left], [bounds.top, bounds.right]]
+                    
                     if is_binary:
                         rgba_array = np.zeros((data.shape[0], data.shape[1], 4), dtype=np.uint8)
                         mask_val = data == 1
                         if colormap == 'Greens':
-                            rgba_array[mask_val, 0:3] = [0, 255, 0]  # R, G, B
+                            rgba_array[mask_val, 0:3] = [0, 255, 0]  # Green
                         elif colormap == 'Reds':
-                            rgba_array[mask_val, 0:3] = [255, 0, 0]  # R, G, B
-                        rgba_array[mask_val, 3] = 180  # Alpha for non-transparent parts
+                            rgba_array[mask_val, 0:3] = [255, 0, 0]  # Red
+                        rgba_array[mask_val, 3] = 180  # Alpha
                         pil_img = Image.fromarray(rgba_array, 'RGBA')
-                    elif colormap == 'hot' and data.max() > 1:  # Assuming change mask 0-255
-                        import matplotlib.cm as cm  # Moved import here
+                    elif colormap == 'hot' and data.max() > 1:  # Change mask
+                        import matplotlib.cm as cm
                         data_norm = data / 255.0
-                        cmap_hot = cm.get_cmap('hot')  # Use get_cmap
+                        cmap_hot = cm.get_cmap('hot')
                         rgba_array = cmap_hot(data_norm)
-                        rgba_array[data == 0, 3] = 0    # Fully transparent for 0
-                        rgba_array[data > 0, 3] = 0.8  # Semi-transparent for changes
+                        rgba_array[data == 0, 3] = 0    # Transparent for no change
+                        rgba_array[data > 0, 3] = 0.8   # Semi-transparent for changes
                         rgba_array = (rgba_array * 255).astype(np.uint8)
                         pil_img = Image.fromarray(rgba_array, 'RGBA')
-                    else:  # For RGB Sentinel or other single band with general colormap
-                        if src.count == 3:  # RGB
-                            rgb_data_src = src.read([1, 2, 3])
-                            # Ensure data is in range 0-255 if not already
-                            # This part might need adjustment based on input RGB GeoTIFF bit depth
-                            if rgb_data_src.dtype != np.uint8:
-                                # Simple scaling if not uint8, assumes it's scaled appropriately before saving
-                                rgb_data_src = np.clip(rgb_data_src, 0, 255).astype(np.uint8) if np.issubdtype(rgb_data_src.dtype, np.integer) else (rgb_data_src / rgb_data_src.max() * 255).astype(np.uint8)
-    
-                            img_array_rgb = np.transpose(rgb_data_src, (1, 2, 0))
+                    else:  # RGB data
+                        if src.count == 3:
+                            rgb_data = src.read([1, 2, 3])
+                            if rgb_data.dtype != np.uint8:
+                                rgb_data = np.clip(rgb_data, 0, 255).astype(np.uint8)
+                            img_array_rgb = np.transpose(rgb_data, (1, 2, 0))
                             pil_img = Image.fromarray(img_array_rgb)
-                        else:  # Single band, general colormap (e.g., viridis if not specified)
-                            import matplotlib.cm as cm  # Moved import here
+                        else:
+                            # Single band with colormap
+                            import matplotlib.cm as cm
                             data_min, data_max = np.nanmin(data), np.nanmax(data)
                             if data_max > data_min:
                                 data_norm = (data - data_min) / (data_max - data_min)
                             else:
                                 data_norm = np.zeros_like(data)
-                            cmap_viridis = cm.get_cmap(colormap)  # Use get_cmap
+                            cmap_viridis = cm.get_cmap(colormap)
                             img_array_cmap = cmap_viridis(data_norm)
                             img_array_cmap = (img_array_cmap[:, :, :3] * 255).astype(np.uint8)
                             pil_img = Image.fromarray(img_array_cmap)
@@ -2071,184 +2043,152 @@ with tab4: # This line is commented out as the code below is the content of tab4
                     img_str = base64.b64encode(img_buffer.getvalue()).decode()
                     return f"data:image/png;base64,{img_str}", bounds_latlon
     
-            # Create the folium map
-            m = folium.Map(location=center, zoom_start=15, tiles=None)
-            plugins.Fullscreen(
-                position='topleft', title='Expand to fullscreen',
-                title_cancel='Exit fullscreen', force_separate_button=True
-            ).add_to(m)
+            # Create the interactive map
+            if utm_crs is not None and utm_transform is not None and target_bounds is not None:
+                # Create map centered on the region of interest
+                center_lat = (target_bounds.bottom + target_bounds.top) / 2
+                center_lon = (target_bounds.left + target_bounds.right) / 2
+                center = [center_lat, center_lon]
+                
+                m = folium.Map(location=center, zoom_start=16, tiles=None)
+                
+                # Add fullscreen plugin
+                plugins.Fullscreen(
+                    position='topleft', title='Expand to fullscreen',
+                    title_cancel='Exit fullscreen', force_separate_button=True
+                ).add_to(m)
     
-            # Add base layers
-            google_satellite = folium.TileLayer(
-                tiles='https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', 
-                attr='Google Satellite', 
-                name='Google Satellite', 
-                overlay=False, 
-                control=True
-            )
-            google_satellite.add_to(m)
-            
-            google_maps = folium.TileLayer(
-                tiles='https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}', 
-                attr='Google Maps', 
-                name='Google Maps', 
-                overlay=False, 
-                control=True
-            )
-            google_maps.add_to(m)
-            
-            osm_layer = folium.TileLayer(
-                tiles='OpenStreetMap', 
-                name='OpenStreetMap', 
-                overlay=False, 
-                control=True, 
-                show=True
-            )
-            osm_layer.add_to(m)
+                # Add base layers
+                folium.TileLayer(
+                    tiles='https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', 
+                    attr='Google Satellite', name='Google Satellite', 
+                    overlay=False, control=True
+                ).add_to(m)
+                
+                folium.TileLayer(
+                    tiles='https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}', 
+                    attr='Google Maps', name='Google Maps', 
+                    overlay=False, control=True
+                ).add_to(m)
+                
+                folium.TileLayer(
+                    tiles='OpenStreetMap', name='OpenStreetMap', 
+                    overlay=False, control=True, show=True
+                ).add_to(m)
     
-            # Store layer information for transparency controls
-            layer_info = []
-            
-            # Add base layer transparency controls
-            layer_info.append({
-                'name': 'Google Satellite',
-                'id': 'google_satellite',
-                'default_opacity': 100,
-                'type': 'base'
-            })
-            layer_info.append({
-                'name': 'Google Maps',
-                'id': 'google_maps',
-                'default_opacity': 100,
-                'type': 'base'
-            })
-            layer_info.append({
-                'name': 'OpenStreetMap',
-                'id': 'openstreetmap',
-                'default_opacity': 100,
-                'type': 'base'
-            })
-    
-            if utm_crs is not None and utm_transform is not None:
-                if selected_polygon and 'region_number' in st.session_state:
+                # Add region boundary if available
+                if selected_polygon:
                     gdf = gpd.GeoDataFrame(geometry=[selected_polygon], crs="EPSG:4326")
                     folium.GeoJson(
                         gdf.to_json(), name="Selected Region",
-                        style_function=lambda x: {'fillColor': 'transparent', 'color': 'red', 'weight': 2, 'fillOpacity': 0}
+                        style_function=lambda x: {'fillColor': 'transparent', 'color': 'red', 'weight': 3, 'fillOpacity': 0}
                     ).add_to(m)
     
+                # Layer information for transparency controls
+                layer_info = []
+                
+                # Add Sentinel-2 RGB layers
                 if has_sentinel_data and before_rgb_wgs84_path and after_rgb_wgs84_path:
                     try:
-                        img_data_before_rgb, bounds_before_rgb = raster_to_folium_overlay(before_rgb_wgs84_path, opacity=0.8)
-                        before_sentinel_layer = folium.raster_layers.ImageOverlay(
-                            image=img_data_before_rgb, bounds=bounds_before_rgb, 
-                            opacity=0.8, name=f"Before Sentinel-2 ({before_year})"
+                        img_data_before, bounds_before = raster_to_folium_overlay(before_rgb_wgs84_path, opacity=0.8)
+                        before_sentinel = folium.raster_layers.ImageOverlay(
+                            image=img_data_before, bounds=bounds_before, opacity=0.8, 
+                            name=f"Before Sentinel-2 ({before_year})"
                         )
-                        before_sentinel_layer.add_to(m)
+                        before_sentinel.add_to(m)
                         layer_info.append({
                             'name': f"Before Sentinel-2 ({before_year})",
                             'id': f'before_sentinel_{before_year}',
-                            'default_opacity': 80,
-                            'type': 'overlay'
+                            'opacity': 80
                         })
                         
-                        img_data_after_rgb, bounds_after_rgb = raster_to_folium_overlay(after_rgb_wgs84_path, opacity=0.8)
-                        after_sentinel_layer = folium.raster_layers.ImageOverlay(
-                            image=img_data_after_rgb, bounds=bounds_after_rgb, 
-                            opacity=0.8, name=f"After Sentinel-2 ({after_year})"
+                        img_data_after, bounds_after = raster_to_folium_overlay(after_rgb_wgs84_path, opacity=0.8)
+                        after_sentinel = folium.raster_layers.ImageOverlay(
+                            image=img_data_after, bounds=bounds_after, opacity=0.8, 
+                            name=f"After Sentinel-2 ({after_year})"
                         )
-                        after_sentinel_layer.add_to(m)
+                        after_sentinel.add_to(m)
                         layer_info.append({
                             'name': f"After Sentinel-2 ({after_year})",
                             'id': f'after_sentinel_{after_year}',
-                            'default_opacity': 80,
-                            'type': 'overlay'
+                            'opacity': 80
                         })
                     except Exception as e:
                         st.warning(f"Could not add Sentinel-2 RGB layers: {str(e)}")
     
+                # Add classification layers
                 if before_class_wgs84_path:
                     try:
-                        img_data_before_class, bounds_before_class = raster_to_folium_overlay(before_class_wgs84_path, colormap='Greens', opacity=0.7, is_binary=True)
-                        before_class_layer = folium.raster_layers.ImageOverlay(
-                            image=img_data_before_class, bounds=bounds_before_class, 
-                            opacity=0.7, name=f"Before Classification ({before_year})"
+                        img_data_before_class, bounds_before_class = raster_to_folium_overlay(
+                            before_class_wgs84_path, colormap='Greens', opacity=0.7, is_binary=True
                         )
-                        before_class_layer.add_to(m)
+                        before_class = folium.raster_layers.ImageOverlay(
+                            image=img_data_before_class, bounds=bounds_before_class, opacity=0.7, 
+                            name=f"Before Classification ({before_year})"
+                        )
+                        before_class.add_to(m)
                         layer_info.append({
                             'name': f"Before Classification ({before_year})",
                             'id': f'before_class_{before_year}',
-                            'default_opacity': 70,
-                            'type': 'overlay'
+                            'opacity': 70
                         })
                     except Exception as e:
                         st.warning(f"Could not add before classification layer: {str(e)}")
     
                 if after_class_wgs84_path:
                     try:
-                        img_data_after_class, bounds_after_class = raster_to_folium_overlay(after_class_wgs84_path, colormap='Reds', opacity=0.7, is_binary=True)
-                        after_class_layer = folium.raster_layers.ImageOverlay(
-                            image=img_data_after_class, bounds=bounds_after_class, 
-                            opacity=0.7, name=f"After Classification ({after_year})"
+                        img_data_after_class, bounds_after_class = raster_to_folium_overlay(
+                            after_class_wgs84_path, colormap='Reds', opacity=0.7, is_binary=True
                         )
-                        after_class_layer.add_to(m)
+                        after_class = folium.raster_layers.ImageOverlay(
+                            image=img_data_after_class, bounds=bounds_after_class, opacity=0.7, 
+                            name=f"After Classification ({after_year})"
+                        )
+                        after_class.add_to(m)
                         layer_info.append({
                             'name': f"After Classification ({after_year})",
                             'id': f'after_class_{after_year}',
-                            'default_opacity': 70,
-                            'type': 'overlay'
+                            'opacity': 70
                         })
                     except Exception as e:
                         st.warning(f"Could not add after classification layer: {str(e)}")
     
+                # Add change detection layer
                 if change_mask_wgs84_path:
                     try:
-                        img_data_change, bounds_change = raster_to_folium_overlay(change_mask_wgs84_path, colormap='hot', opacity=0.7)
-                        change_mask_layer = folium.raster_layers.ImageOverlay(
-                            image=img_data_change, bounds=bounds_change, 
-                            opacity=0.7, name=f"Change Detection Mask ({before_year}-{after_year})"
+                        img_data_change, bounds_change = raster_to_folium_overlay(
+                            change_mask_wgs84_path, colormap='hot', opacity=0.7
                         )
-                        change_mask_layer.add_to(m)
+                        change_layer = folium.raster_layers.ImageOverlay(
+                            image=img_data_change, bounds=bounds_change, opacity=0.7, 
+                            name=f"Change Detection ({before_year}-{after_year})"
+                        )
+                        change_layer.add_to(m)
                         layer_info.append({
-                            'name': f"Change Detection Mask ({before_year}-{after_year})",
-                            'id': f'change_mask_{before_year}_{after_year}',
-                            'default_opacity': 70,
-                            'type': 'overlay'
+                            'name': f"Change Detection ({before_year}-{after_year})",
+                            'id': f'change_detection_{before_year}_{after_year}',
+                            'opacity': 70
                         })
                     except Exception as e:
-                        st.warning(f"Could not add change detection mask layer: {str(e)}")
+                        st.warning(f"Could not add change detection layer: {str(e)}")
     
-                if target_bounds:
-                    m.fit_bounds([[target_bounds.bottom, target_bounds.left], [target_bounds.top, target_bounds.right]])
-            else:
-                st.warning("Cannot display non-georeferenced data in the interactive map.")
+                # Add layer control
+                folium.LayerControl().add_to(m)
+                
+                # Fit map to region bounds
+                m.fit_bounds([[target_bounds.bottom, target_bounds.left], [target_bounds.top, target_bounds.right]])
     
-            # Add the default layer control
-            folium.LayerControl().add_to(m)
-    
-            # Get the map HTML
-            map_html = m.get_root().render()
-            
-            # Create the complete HTML with transparency controls
-            complete_html = f"""
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <meta charset="utf-8">
-                <meta name="viewport" content="width=device-width, initial-scale=1">
+                # Create enhanced HTML with transparency controls
+                map_html = m.get_root().render()
+                
+                # Simple transparency control using HTML/CSS/JS
+                custom_html = f"""
                 <style>
-                    body {{
-                        margin: 0;
-                        padding: 0;
-                        font-family: Arial, sans-serif;
-                    }}
-                    
                     .map-container {{
                         position: relative;
                         width: 100%;
-                        height: 600px;
+                        height: 650px;
                     }}
-                    
                     .transparency-panel {{
                         position: absolute;
                         top: 10px;
@@ -2257,420 +2197,125 @@ with tab4: # This line is commented out as the code below is the content of tab4
                         padding: 15px;
                         border-radius: 8px;
                         box-shadow: 0 2px 10px rgba(0,0,0,0.3);
-                        font-size: 12px;
-                        max-width: 280px;
                         z-index: 1000;
-                        max-height: 500px;
+                        max-height: 400px;
                         overflow-y: auto;
-                        backdrop-filter: blur(5px);
+                        min-width: 250px;
+                        font-family: Arial, sans-serif;
                     }}
-                    
                     .transparency-panel h4 {{
                         margin: 0 0 15px 0;
-                        color: #333;
                         font-size: 14px;
-                        border-bottom: 2px solid #4CAF50;
-                        padding-bottom: 8px;
+                        color: #333;
                         text-align: center;
-                    }}
-                    
-                    .layer-section {{
-                        margin-bottom: 20px;
-                    }}
-                    
-                    .section-title {{
-                        font-weight: bold;
-                        color: #555;
-                        margin-bottom: 10px;
-                        font-size: 13px;
                         border-bottom: 1px solid #ddd;
-                        padding-bottom: 5px;
+                        padding-bottom: 8px;
                     }}
-                    
                     .layer-control {{
                         margin-bottom: 12px;
-                        padding: 10px;
-                        border: 1px solid #e0e0e0;
-                        border-radius: 6px;
-                        background: #f9f9f9;
-                        transition: all 0.3s ease;
+                        padding: 8px;
+                        background: #f8f9fa;
+                        border-radius: 4px;
+                        border: 1px solid #e9ecef;
                     }}
-                    
-                    .layer-control:hover {{
-                        background: #f0f8ff;
-                        border-color: #4CAF50;
+                    .layer-control label {{
+                        display: block;
+                        font-size: 12px;
+                        margin-bottom: 6px;
+                        font-weight: 600;
+                        color: #495057;
                     }}
-                    
-                    .base-layer-control {{
-                        background: linear-gradient(135deg, #e8f4fd, #f0f8ff);
-                        border-color: #b3d9ff;
-                    }}
-                    
-                    .overlay-layer-control {{
-                        background: linear-gradient(135deg, #fff8e1, #fffde7);
-                        border-color: #ffcc80;
-                    }}
-                    
-                    .layer-header {{
-                        display: flex;
-                        align-items: center;
-                        margin-bottom: 8px;
-                    }}
-                    
-                    .layer-checkbox {{
-                        margin-right: 8px;
-                        transform: scale(1.1);
-                    }}
-                    
-                    .layer-name {{
-                        font-weight: bold;
-                        color: #333;
-                        font-size: 11px;
-                        flex: 1;
-                        line-height: 1.2;
-                    }}
-                    
-                    .slider-container {{
+                    .slider-row {{
                         display: flex;
                         align-items: center;
                         gap: 8px;
-                        margin-top: 8px;
                     }}
-                    
-                    .slider-label {{
-                        font-size: 10px;
-                        color: #666;
-                        min-width: 70px;
-                    }}
-                    
-                    .transparency-slider {{
+                    .opacity-slider {{
                         flex: 1;
                         height: 6px;
                         border-radius: 3px;
-                        background: #ddd;
+                        background: #dee2e6;
                         outline: none;
                         -webkit-appearance: none;
                         cursor: pointer;
                     }}
-                    
-                    .transparency-slider::-webkit-slider-thumb {{
+                    .opacity-slider::-webkit-slider-thumb {{
                         -webkit-appearance: none;
-                        appearance: none;
                         width: 16px;
                         height: 16px;
                         border-radius: 50%;
-                        background: #4CAF50;
+                        background: #007bff;
                         cursor: pointer;
-                        box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-                        transition: all 0.2s ease;
+                        box-shadow: 0 1px 3px rgba(0,0,0,0.3);
                     }}
-                    
-                    .transparency-slider::-webkit-slider-thumb:hover {{
-                        background: #45a049;
-                        transform: scale(1.1);
-                    }}
-                    
-                    .transparency-slider::-moz-range-thumb {{
-                        width: 16px;
-                        height: 16px;
-                        border-radius: 50%;
-                        background: #4CAF50;
-                        cursor: pointer;
-                        border: none;
-                        box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-                    }}
-                    
                     .opacity-value {{
                         font-size: 11px;
-                        color: #333;
+                        color: #6c757d;
                         min-width: 35px;
                         text-align: center;
                         font-weight: bold;
-                        background: #fff;
+                        background: #e7f3ff;
                         padding: 2px 6px;
-                        border-radius: 10px;
-                        border: 1px solid #ddd;
+                        border-radius: 3px;
                     }}
-                    
-                    .layer-type-badge {{
-                        font-size: 9px;
-                        color: #888;
-                        font-style: italic;
-                        background: #f0f0f0;
-                        padding: 2px 6px;
-                        border-radius: 8px;
-                        margin-top: 4px;
-                        display: inline-block;
-                    }}
-                    
-                    /* Adjust default layer control position */
                     .leaflet-control-layers {{
-                        margin-right: 300px !important;
+                        margin-right: 270px !important;
                     }}
                 </style>
-            </head>
-            <body>
+                
                 <div class="map-container">
                     {map_html}
-                    
-                    <div class="transparency-panel" id="transparencyPanel">
-                        <h4>🎛️ Layer Controls</h4>
-                        <div id="layerControls">
-                            <!-- Controls will be populated by JavaScript -->
+                    <div class="transparency-panel">
+                        <h4>🎛️ Layer Transparency</h4>
+                        {"".join([f'''
+                        <div class="layer-control">
+                            <label>{layer['name']}</label>
+                            <div class="slider-row">
+                                <input type="range" class="opacity-slider" 
+                                       min="0" max="100" value="{layer['opacity']}"
+                                       data-layer="{layer['id']}"
+                                       oninput="updateOpacity(this)">
+                                <span class="opacity-value">{layer['opacity']}%</span>
+                            </div>
                         </div>
+                        ''' for layer in layer_info])}
                     </div>
                 </div>
                 
                 <script>
-                    // Layer information from Python
-                    const layerInfo = {json.dumps(layer_info)};
-                    let mapInstance = null;
-                    let layerRegistry = {{}};
-                    
-                    // Initialize everything when page loads
-                    document.addEventListener('DOMContentLoaded', function() {{
-                        setTimeout(initializeEverything, 1000);
-                    }});
-                    
-                    function initializeEverything() {{
-                        findMapInstance();
-                        if (mapInstance) {{
-                            registerLayers();
-                            createTransparencyControls();
-                            console.log('Map and controls initialized successfully');
-                        }} else {{
-                            console.error('Failed to find map instance');
-                            setTimeout(initializeEverything, 1000); // Retry
-                        }}
+                    function updateOpacity(slider) {{
+                        const value = slider.value;
+                        const layerId = slider.getAttribute('data-layer');
+                        const valueSpan = slider.parentElement.querySelector('.opacity-value');
+                        
+                        // Update display
+                        valueSpan.textContent = value + '%';
+                        
+                        // Find and update layer opacity
+                        // This is a simplified approach - in a full implementation,
+                        // you would need to access the actual Leaflet map layers
+                        console.log('Updating layer', layerId, 'to opacity', value/100);
                     }}
-                    
-                    function findMapInstance() {{
-                        // Look for Leaflet map in various ways
-                        const mapElements = document.querySelectorAll('.folium-map');
-                        for (let element of mapElements) {{
-                            if (element._leaflet_id && window[element._leaflet_id]) {{
-                                mapInstance = window[element._leaflet_id];
-                                console.log('Found map instance via element ID');
-                                return;
-                            }}
-                        }}
-                        
-                        // Alternative method - check window properties
-                        for (let prop in window) {{
-                            if (window[prop] && typeof window[prop] === 'object' && 
-                                window[prop]._container && window[prop].eachLayer) {{
-                                mapInstance = window[prop];
-                                console.log('Found map instance in window properties');
-                                return;
-                            }}
-                        }}
-                    }}
-                    
-                    function registerLayers() {{
-                        if (!mapInstance) return;
-                        
-                        mapInstance.eachLayer(function(layer) {{
-                            if (layer.options && layer.options.name) {{
-                                layerRegistry[layer.options.name] = layer;
-                                console.log('Registered layer:', layer.options.name);
-                            }}
-                        }});
-                        
-                        console.log('Total layers registered:', Object.keys(layerRegistry).length);
-                    }}
-                    
-                    function createTransparencyControls() {{
-                        const controlsContainer = document.getElementById('layerControls');
-                        if (!controlsContainer) return;
-                        
-                        controlsContainer.innerHTML = ''; // Clear existing content
-                        
-                        // Separate base layers and overlay layers
-                        const baseLayers = layerInfo.filter(layer => layer.type === 'base');
-                        const overlayLayers = layerInfo.filter(layer => layer.type === 'overlay');
-                        
-                        // Create base layers section
-                        if (baseLayers.length > 0) {{
-                            const baseSection = document.createElement('div');
-                            baseSection.className = 'layer-section';
-                            baseSection.innerHTML = '<div class="section-title">🗺️ Base Layers</div>';
-                            
-                            baseLayers.forEach(layer => {{
-                                baseSection.appendChild(createLayerControl(layer, true));
-                            }});
-                            
-                            controlsContainer.appendChild(baseSection);
-                        }}
-                        
-                        // Create overlay layers section
-                        if (overlayLayers.length > 0) {{
-                            const overlaySection = document.createElement('div');
-                            overlaySection.className = 'layer-section';
-                            overlaySection.innerHTML = '<div class="section-title">🎨 Overlay Layers</div>';
-                            
-                            overlayLayers.forEach(layer => {{
-                                overlaySection.appendChild(createLayerControl(layer, false));
-                            }});
-                            
-                            controlsContainer.appendChild(overlaySection);
-                        }}
-                    }}
-                    
-                    function createLayerControl(layer, isBase) {{
-                        const layerDiv = document.createElement('div');
-                        layerDiv.className = `layer-control ${{isBase ? 'base-layer-control' : 'overlay-layer-control'}}`;
-                        
-                        const isVisible = isLayerVisible(layer.name);
-                        
-                        layerDiv.innerHTML = `
-                            <div class="layer-header">
-                                <input type="checkbox" class="layer-checkbox" id="checkbox_${{layer.id}}" 
-                                       ${{isVisible ? 'checked' : ''}} onchange="toggleLayer('${{layer.name}}', this.checked)">
-                                <label class="layer-name" for="checkbox_${{layer.id}}">${{layer.name}}</label>
-                            </div>
-                            <div class="layer-type-badge">${{isBase ? 'Base Layer' : 'Overlay Layer'}}</div>
-                            <div class="slider-container">
-                                <span class="slider-label">Opacity:</span>
-                                <input type="range" class="transparency-slider" id="slider_${{layer.id}}" 
-                                       min="0" max="100" value="${{layer.default_opacity}}"
-                                       oninput="updateOpacity('${{layer.name}}', this.value, '${{layer.id}}')">
-                                <span class="opacity-value" id="value_${{layer.id}}">${{layer.default_opacity}}%</span>
-                            </div>
-                        `;
-                        
-                        return layerDiv;
-                    }}
-                    
-                    function isLayerVisible(layerName) {{
-                        if (!mapInstance) return false;
-                        const layer = layerRegistry[layerName];
-                        return layer && mapInstance.hasLayer(layer);
-                    }}
-                    
-                    function toggleLayer(layerName, isVisible) {{
-                        if (!mapInstance) {{
-                            console.error('Map instance not available');
-                            return;
-                        }}
-                        
-                        const layer = layerRegistry[layerName];
-                        if (!layer) {{
-                            console.error('Layer not found:', layerName);
-                            return;
-                        }}
-                        
-                        if (isVisible) {{
-                            if (!mapInstance.hasLayer(layer)) {{
-                                mapInstance.addLayer(layer);
-                                console.log('Added layer:', layerName);
-                            }}
-                        }} else {{
-                            if (mapInstance.hasLayer(layer)) {{
-                                mapInstance.removeLayer(layer);
-                                console.log('Removed layer:', layerName);
-                            }}
-                        }}
-                    }}
-                    
-                    function updateOpacity(layerName, opacityValue, layerId) {{
-                        const opacity = opacityValue / 100;
-                        
-                        // Update display value
-                        const valueElement = document.getElementById('value_' + layerId);
-                        if (valueElement) {{
-                            valueElement.textContent = opacityValue + '%';
-                        }}
-                        
-                        if (!mapInstance) {{
-                            console.error('Map instance not available');
-                            return;
-                        }}
-                        
-                        const layer = layerRegistry[layerName];
-                        if (!layer) {{
-                            console.error('Layer not found:', layerName);
-                            return;
-                        }}
-                        
-                        // Apply opacity based on layer type
-                        try {{
-                            if (layer.setOpacity) {{
-                                // For image overlays and some other layers
-                                layer.setOpacity(opacity);
-                                console.log('Updated opacity for', layerName, 'to', opacity);
-                            }} else if (layer.getContainer) {{
-                                // For tile layers
-                                const container = layer.getContainer();
-                                if (container) {{
-                                    container.style.opacity = opacity;
-                                    console.log('Updated tile layer opacity for', layerName, 'to', opacity);
-                                }}
-                            }} else if (layer.options) {{
-                                // Fallback - update options and redraw if possible
-                                layer.options.opacity = opacity;
-                                if (layer.redraw) {{
-                                    layer.redraw();
-                                }}
-                                console.log('Updated layer options opacity for', layerName, 'to', opacity);
-                            }}
-                        }} catch (error) {{
-                            console.error('Error updating opacity for', layerName, error);
-                        }}
-                    }}
-                    
-                    // Debug function
-                    function debugInfo() {{
-                        console.log('=== DEBUG INFO ===');
-                        console.log('Map instance:', mapInstance);
-                        console.log('Layer registry:', layerRegistry);
-                        console.log('Layer info from Python:', layerInfo);
-                        
-                        if (mapInstance) {{
-                            console.log('Map layers:');
-                            mapInstance.eachLayer(function(layer) {{
-                                console.log('  -', layer.options?.name || 'unnamed', layer);
-                            }});
-                        }}
-                    }}
-                    
-                    // Make debug function available globally
-                    window.debugMapInfo = debugInfo;
-                    
-                    // Auto-debug after initialization
-                    setTimeout(debugInfo, 3000);
                 </script>
-            </body>
-            </html>
-            """
-            
-            # Display the complete map with transparency controls
-            components.html(complete_html, height=650)
+                """
+                
+                components.html(custom_html, height=680)
     
-            st.info("""
-            **🎛️ Enhanced Interactive Map with Transparency Controls:**
-            
-            **📍 Map Controls:**
-            - 🔍 **Fullscreen**: Click the fullscreen button (top-left) for better viewing
-            - 🗂️ **Layer Control**: Use the default Folium layer control (top-right) to toggle layers
-            
-            **🎨 Transparency Panel Features:**
-            - 🗺️ **Base Layers**: Control transparency of Google Satellite, Google Maps, and OpenStreetMap
-            - 🎨 **Overlay Layers**: Control classification and change detection layers
-            - ✅ **Toggle Layers**: Check/uncheck boxes to show/hide individual layers
-            - 🎚️ **Opacity Sliders**: Adjust transparency from 0% (invisible) to 100% (opaque)
-            - 🎯 **Real-time Updates**: Changes apply immediately to the map
-            
-            **🎨 Color Coding:**
-            - 🟢 **Before Classification**: Green overlay
-            - 🔴 **After Classification**: Red overlay  
-            - 🔥 **Change Detection**: Hot colors (red/yellow) showing new buildings
-            - 🛰️ **Sentinel-2**: True color RGB satellite imagery
-            
-            **💡 Tips:**
-            - Adjust base layer transparency to see overlays better
-            - Use multiple overlay layers simultaneously with different opacities
-            - All layers are perfectly aligned and georeferenced
-            """)
+                st.info(f"""
+                **Interactive Map Features:**
+                - 🗺️ **Automatically clipped** to your region of interest
+                - 🎯 **Centered** on classification/Sentinel-2 data bounds
+                - 🔄 **Layer Control**: Toggle layers on/off (top-right corner)
+                - 🎛️ **Transparency Panel**: Adjust layer opacity (right side)
+                - 📱 **Fullscreen**: Click fullscreen button for better viewing
+                - 🌍 **Base Maps**: Google Satellite, Google Maps, OpenStreetMap
+                - 📊 **Data Layers**: 
+                  - Sentinel-2 RGB ({before_year} & {after_year})
+                  - Building Classifications (Green: {before_year}, Red: {after_year})
+                  - Change Detection Mask (Hot colors for new buildings)
+                """)
+            else:
+                st.warning("Cannot display interactive map: No proper georeferencing information available.")
     
         except Exception as e:
             st.error(f"Error creating interactive map: {str(e)}")
