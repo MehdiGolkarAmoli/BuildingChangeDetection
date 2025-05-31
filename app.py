@@ -1660,7 +1660,6 @@ with tab3:
 #     return eroded_mask
 
 
-ith tab4: # This line is commented out as the code below is the content of tab4
 # Assuming 'st' is your streamlit import (import streamlit as st)
 # Assuming 'np' is your numpy import (import numpy as np)
 # Assuming 'plt' is your matplotlib.pyplot import (import matplotlib.pyplot as plt)
