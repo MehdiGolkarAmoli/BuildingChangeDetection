@@ -1747,7 +1747,7 @@ with tab4: # This line is commented out as the code below is the content of tab4
     # 6) Interactive Map only once we have eroded_result
     if "eroded_result" in st.session_state:
         st.subheader("Interactive Map")
-        st.info("Use the layer control in the top-right to toggle layers on/off and adjust opacity. Click the fullscreen button to view the map in fullscreen mode.")
+        st.info("Use the layer control in the top-right to toggle layers on/off. Click the fullscreen button to view the map in fullscreen mode.")
     
         try:
             if ('region_number' in st.session_state and
@@ -2071,16 +2071,73 @@ with tab4: # This line is commented out as the code below is the content of tab4
                     pil_img.save(img_buffer, format='PNG')
                     img_str = base64.b64encode(img_buffer.getvalue()).decode()
                     return f"data:image/png;base64,{img_str}", bounds_latlon
+
+            # Function to create a white background layer
+            def create_white_background_layer(bounds):
+                """Create a white background layer for the study area"""
+                # Create a simple white image
+                white_img = Image.new('RGB', (100, 100), color='white')
+                img_buffer = io.BytesIO()
+                white_img.save(img_buffer, format='PNG')
+                img_str = base64.b64encode(img_buffer.getvalue()).decode()
+                return f"data:image/png;base64,{img_str}"
     
+            # Initialize the map with no default tiles
             m = folium.Map(location=center, zoom_start=15, tiles=None)
             plugins.Fullscreen(
                 position='topleft', title='Expand to fullscreen',
                 title_cancel='Exit fullscreen', force_separate_button=True
             ).add_to(m)
+
+            # Add the new "None/White Background" layer as the first option
+            if target_bounds:
+                white_bg_data = create_white_background_layer(target_bounds)
+                folium.raster_layers.ImageOverlay(
+                    image=white_bg_data, 
+                    bounds=[[target_bounds.bottom, target_bounds.left], [target_bounds.top, target_bounds.right]], 
+                    opacity=1.0, 
+                    name="None (White Background)", 
+                    overlay=False, 
+                    control=True,
+                    show=True  # Make this the default layer
+                ).add_to(m)
+            else:
+                # Fallback for cases without target_bounds
+                folium.TileLayer(
+                    tiles='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==',
+                    attr='White Background',
+                    name='None (White Background)',
+                    overlay=False,
+                    control=True,
+                    show=True
+                ).add_to(m)
     
-            folium.TileLayer(tiles='https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', attr='Google Satellite', name='Google Satellite', overlay=False, control=True).add_to(m)
-            folium.TileLayer(tiles='https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}', attr='Google Maps', name='Google Maps', overlay=False, control=True).add_to(m)
-            folium.TileLayer(tiles='OpenStreetMap', name='OpenStreetMap', overlay=False, control=True, show=True).add_to(m)  # Default OSM shown
+            # Add traditional base layers (now as secondary options)
+            folium.TileLayer(
+                tiles='https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', 
+                attr='Google Satellite', 
+                name='Google Satellite', 
+                overlay=False, 
+                control=True,
+                show=False  # Not shown by default
+            ).add_to(m)
+            
+            folium.TileLayer(
+                tiles='https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}', 
+                attr='Google Maps', 
+                name='Google Maps', 
+                overlay=False, 
+                control=True,
+                show=False  # Not shown by default
+            ).add_to(m)
+            
+            folium.TileLayer(
+                tiles='OpenStreetMap', 
+                name='OpenStreetMap', 
+                overlay=False, 
+                control=True, 
+                show=False  # Not shown by default
+            ).add_to(m)
     
             if utm_crs is not None and utm_transform is not None:
                 if selected_polygon and 'region_number' in st.session_state:
@@ -2136,11 +2193,12 @@ with tab4: # This line is commented out as the code below is the content of tab4
             **Interactive Map Usage (Folium):**
             - Click the **fullscreen button** (top-left) to view the map in fullscreen mode.
             - Use the layer control in the top-right to toggle layers on/off.
-            - Switch between Google Satellite, Google Maps, and OpenStreetMap base layers.
+            - **NEW**: Select "None (White Background)" for a clean white background without interference from base maps.
+            - Switch between Google Satellite, Google Maps, and OpenStreetMap base layers when needed.
             - The map shows before classification in **green** and after classification in **red**.
             - Change detection mask shows new buildings in **hot colors** (red/yellow).
             - All layers are now perfectly aligned with the same extent.
-            - Click on the map to explore different areas.
+            - The white background layer ensures optimal quality for your Sentinel-2 and classification data.
             """)
     
         except Exception as e:
@@ -2149,4 +2207,3 @@ with tab4: # This line is commented out as the code below is the content of tab4
             st.error(traceback.format_exc())
     else:
         st.info("After applying erosion, the interactive map will appear here.")
-    
