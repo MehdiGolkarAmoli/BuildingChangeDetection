@@ -1738,7 +1738,7 @@ with tab4:
         st.subheader("Interactive Map")
         
         # Note about layer visibility
-        st.info("Use the layer control in the top-right to toggle layers on/off and adjust opacity.")
+        st.info("Use the layer control in the top-right to toggle layers on/off and adjust opacity. Click the fullscreen button to view the map in fullscreen mode.")
         
         try:
             # Get the polygon used for processing
@@ -2239,6 +2239,14 @@ with tab4:
                 tiles=None  # We'll add tiles manually
             )
             
+            # Add fullscreen button
+            plugins.Fullscreen(
+                position='topleft',
+                title='Expand to fullscreen',
+                title_cancel='Exit fullscreen',
+                force_separate_button=True
+            ).add_to(m)
+            
             # Add base layers
             folium.TileLayer(
                 tiles='https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}',
@@ -2377,6 +2385,7 @@ with tab4:
             # Add explanation for the interactive map
             st.info("""
             **Interactive Map Usage (Folium):**
+            - Click the **fullscreen button** (top-left) to view the map in fullscreen mode
             - Use the layer control in the top-right to toggle layers on/off
             - Switch between Google Satellite, Google Maps, and OpenStreetMap base layers
             - The map shows before classification in **green** and after classification in **red**
