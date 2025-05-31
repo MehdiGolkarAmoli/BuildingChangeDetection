@@ -1646,7 +1646,6 @@ with tab3:
     else:
         st.info("No regions have been selected yet. Please go to the Region Selection tab and draw a polygon.")
 
-
 with tab4: # This line is commented out as the code below is the content of tab4
     st.header("Building Change Detection")
     
@@ -1746,8 +1745,8 @@ with tab4: # This line is commented out as the code below is the content of tab4
     
     # 6) Interactive Map only once we have eroded_result
     if "eroded_result" in st.session_state:
-        st.subheader("Interactive Map")
-        st.info("Use the layer control in the top-right to toggle layers on/off and adjust opacity. Click the fullscreen button to view the map in fullscreen mode.")
+        st.subheader("Interactive Map with Transparency Controls")
+        st.info("Use the layer control panel on the right to toggle layers on/off and adjust transparency with the sliders. Click the fullscreen button to view the map in fullscreen mode.")
     
         try:
             if ('region_number' in st.session_state and
@@ -2072,15 +2071,20 @@ with tab4: # This line is commented out as the code below is the content of tab4
                     img_str = base64.b64encode(img_buffer.getvalue()).decode()
                     return f"data:image/png;base64,{img_str}", bounds_latlon
     
+            # Create the folium map
             m = folium.Map(location=center, zoom_start=15, tiles=None)
             plugins.Fullscreen(
                 position='topleft', title='Expand to fullscreen',
                 title_cancel='Exit fullscreen', force_separate_button=True
             ).add_to(m)
     
+            # Add base layers
             folium.TileLayer(tiles='https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', attr='Google Satellite', name='Google Satellite', overlay=False, control=True).add_to(m)
             folium.TileLayer(tiles='https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}', attr='Google Maps', name='Google Maps', overlay=False, control=True).add_to(m)
             folium.TileLayer(tiles='OpenStreetMap', name='OpenStreetMap', overlay=False, control=True, show=True).add_to(m)  # Default OSM shown
+    
+            # Store layer information for transparency controls
+            layer_info = []
     
             if utm_crs is not None and utm_transform is not None:
                 if selected_polygon and 'region_number' in st.session_state:
@@ -2093,30 +2097,76 @@ with tab4: # This line is commented out as the code below is the content of tab4
                 if has_sentinel_data and before_rgb_wgs84_path and after_rgb_wgs84_path:
                     try:
                         img_data_before_rgb, bounds_before_rgb = raster_to_folium_overlay(before_rgb_wgs84_path, opacity=0.8)
-                        folium.raster_layers.ImageOverlay(image=img_data_before_rgb, bounds=bounds_before_rgb, opacity=1.0, name=f"Before Sentinel-2 ({before_year})").add_to(m)  # Opacity handled in PNG
+                        before_sentinel_layer = folium.raster_layers.ImageOverlay(
+                            image=img_data_before_rgb, bounds=bounds_before_rgb, 
+                            opacity=0.8, name=f"Before Sentinel-2 ({before_year})"
+                        )
+                        before_sentinel_layer.add_to(m)
+                        layer_info.append({
+                            'name': f"Before Sentinel-2 ({before_year})",
+                            'id': f'before_sentinel_{before_year}',
+                            'default_opacity': 0.8
+                        })
+                        
                         img_data_after_rgb, bounds_after_rgb = raster_to_folium_overlay(after_rgb_wgs84_path, opacity=0.8)
-                        folium.raster_layers.ImageOverlay(image=img_data_after_rgb, bounds=bounds_after_rgb, opacity=1.0, name=f"After Sentinel-2 ({after_year})").add_to(m)  # Opacity handled in PNG
+                        after_sentinel_layer = folium.raster_layers.ImageOverlay(
+                            image=img_data_after_rgb, bounds=bounds_after_rgb, 
+                            opacity=0.8, name=f"After Sentinel-2 ({after_year})"
+                        )
+                        after_sentinel_layer.add_to(m)
+                        layer_info.append({
+                            'name': f"After Sentinel-2 ({after_year})",
+                            'id': f'after_sentinel_{after_year}',
+                            'default_opacity': 0.8
+                        })
                     except Exception as e:
                         st.warning(f"Could not add Sentinel-2 RGB layers: {str(e)}")
     
                 if before_class_wgs84_path:
                     try:
                         img_data_before_class, bounds_before_class = raster_to_folium_overlay(before_class_wgs84_path, colormap='Greens', opacity=0.7, is_binary=True)
-                        folium.raster_layers.ImageOverlay(image=img_data_before_class, bounds=bounds_before_class, opacity=1.0, name=f"Before Classification ({before_year})").add_to(m)  # Opacity handled in PNG
+                        before_class_layer = folium.raster_layers.ImageOverlay(
+                            image=img_data_before_class, bounds=bounds_before_class, 
+                            opacity=0.7, name=f"Before Classification ({before_year})"
+                        )
+                        before_class_layer.add_to(m)
+                        layer_info.append({
+                            'name': f"Before Classification ({before_year})",
+                            'id': f'before_class_{before_year}',
+                            'default_opacity': 0.7
+                        })
                     except Exception as e:
                         st.warning(f"Could not add before classification layer: {str(e)}")
     
                 if after_class_wgs84_path:
                     try:
                         img_data_after_class, bounds_after_class = raster_to_folium_overlay(after_class_wgs84_path, colormap='Reds', opacity=0.7, is_binary=True)
-                        folium.raster_layers.ImageOverlay(image=img_data_after_class, bounds=bounds_after_class, opacity=1.0, name=f"After Classification ({after_year})").add_to(m)  # Opacity handled in PNG
+                        after_class_layer = folium.raster_layers.ImageOverlay(
+                            image=img_data_after_class, bounds=bounds_after_class, 
+                            opacity=0.7, name=f"After Classification ({after_year})"
+                        )
+                        after_class_layer.add_to(m)
+                        layer_info.append({
+                            'name': f"After Classification ({after_year})",
+                            'id': f'after_class_{after_year}',
+                            'default_opacity': 0.7
+                        })
                     except Exception as e:
                         st.warning(f"Could not add after classification layer: {str(e)}")
     
                 if change_mask_wgs84_path:
                     try:
                         img_data_change, bounds_change = raster_to_folium_overlay(change_mask_wgs84_path, colormap='hot', opacity=0.7)
-                        folium.raster_layers.ImageOverlay(image=img_data_change, bounds=bounds_change, opacity=1.0, name=f"Change Detection Mask ({before_year}-{after_year})").add_to(m)  # Opacity handled in PNG
+                        change_mask_layer = folium.raster_layers.ImageOverlay(
+                            image=img_data_change, bounds=bounds_change, 
+                            opacity=0.7, name=f"Change Detection Mask ({before_year}-{after_year})"
+                        )
+                        change_mask_layer.add_to(m)
+                        layer_info.append({
+                            'name': f"Change Detection Mask ({before_year}-{after_year})",
+                            'id': f'change_mask_{before_year}_{after_year}',
+                            'default_opacity': 0.7
+                        })
                     except Exception as e:
                         st.warning(f"Could not add change detection mask layer: {str(e)}")
     
@@ -2125,22 +2175,205 @@ with tab4: # This line is commented out as the code below is the content of tab4
             else:
                 st.warning("Cannot display non-georeferenced data in the interactive map.")
     
+            # Add the default layer control
             folium.LayerControl().add_to(m)
     
-            # --- MODIFIED PART FOR DISPLAY ---
+            # Get the map HTML
             map_html = m.get_root().render()
-            components.html(map_html, height=600)  # Use components.html
-            # --- END OF MODIFIED PART ---
+            
+            # Create custom transparency control panel HTML and JavaScript
+            transparency_control_html = f"""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <style>
+                    .transparency-panel {{
+                        position: absolute;
+                        top: 10px;
+                        right: 10px;
+                        background: white;
+                        padding: 15px;
+                        border-radius: 8px;
+                        box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+                        font-family: Arial, sans-serif;
+                        font-size: 12px;
+                        max-width: 280px;
+                        z-index: 1000;
+                        max-height: 400px;
+                        overflow-y: auto;
+                    }}
+                    
+                    .transparency-panel h4 {{
+                        margin: 0 0 15px 0;
+                        color: #333;
+                        font-size: 14px;
+                        border-bottom: 1px solid #ddd;
+                        padding-bottom: 8px;
+                    }}
+                    
+                    .layer-control {{
+                        margin-bottom: 15px;
+                        padding: 8px;
+                        border: 1px solid #e0e0e0;
+                        border-radius: 4px;
+                        background: #f9f9f9;
+                    }}
+                    
+                    .layer-header {{
+                        display: flex;
+                        align-items: center;
+                        margin-bottom: 8px;
+                    }}
+                    
+                    .layer-checkbox {{
+                        margin-right: 8px;
+                    }}
+                    
+                    .layer-name {{
+                        font-weight: bold;
+                        color: #333;
+                        font-size: 11px;
+                        flex: 1;
+                    }}
+                    
+                    .transparency-slider {{
+                        width: 100%;
+                        margin-top: 5px;
+                    }}
+                    
+                    .opacity-value {{
+                        font-size: 10px;
+                        color: #666;
+                        text-align: center;
+                        margin-top: 2px;
+                    }}
+                    
+                    .slider-container {{
+                        display: flex;
+                        align-items: center;
+                        gap: 8px;
+                    }}
+                    
+                    .slider-label {{
+                        font-size: 10px;
+                        color: #666;
+                        min-width: 60px;
+                    }}
+                </style>
+            </head>
+            <body>
+                {map_html}
+                
+                <div class="transparency-panel" id="transparencyPanel">
+                    <h4>🎛️ Layer Controls</h4>
+                    <div id="layerControls">
+                        <!-- Layer controls will be populated by JavaScript -->
+                    </div>
+                </div>
+                
+                <script>
+                    // Layer information
+                    const layerInfo = {json.dumps(layer_info)};
+                    
+                    // Wait for map to be fully loaded
+                    setTimeout(function() {{
+                        initializeTransparencyControls();
+                    }}, 1000);
+                    
+                    function initializeTransparencyControls() {{
+                        const controlsContainer = document.getElementById('layerControls');
+                        
+                        layerInfo.forEach(function(layer, index) {{
+                            const layerDiv = document.createElement('div');
+                            layerDiv.className = 'layer-control';
+                            layerDiv.innerHTML = `
+                                <div class="layer-header">
+                                    <input type="checkbox" class="layer-checkbox" id="checkbox_${{layer.id}}" checked onchange="toggleLayer('${{layer.id}}', this.checked)">
+                                    <label class="layer-name" for="checkbox_${{layer.id}}">${{layer.name}}</label>
+                                </div>
+                                <div class="slider-container">
+                                    <span class="slider-label">Transparency:</span>
+                                    <input type="range" class="transparency-slider" id="slider_${{layer.id}}" 
+                                           min="0" max="100" value="${{Math.round(layer.default_opacity * 100)}}"
+                                           oninput="updateOpacity('${{layer.id}}', this.value)">
+                                </div>
+                                <div class="opacity-value" id="value_${{layer.id}}">${{Math.round(layer.default_opacity * 100)}}%</div>
+                            `;
+                            controlsContainer.appendChild(layerDiv);
+                        }});
+                    }}
+                    
+                    function toggleLayer(layerId, isVisible) {{
+                        // Find the layer in the map
+                        if (window[window.map_var] && window[window.map_var].eachLayer) {{
+                            window[window.map_var].eachLayer(function(layer) {{
+                                if (layer.options && layer.options.name) {{
+                                    const layerName = layer.options.name;
+                                    const matchingLayerInfo = layerInfo.find(info => info.id === layerId);
+                                    if (matchingLayerInfo && layerName === matchingLayerInfo.name) {{
+                                        if (isVisible) {{
+                                            if (!window[window.map_var].hasLayer(layer)) {{
+                                                window[window.map_var].addLayer(layer);
+                                            }}
+                                        }} else {{
+                                            if (window[window.map_var].hasLayer(layer)) {{
+                                                window[window.map_var].removeLayer(layer);
+                                            }}
+                                        }}
+                                    }}
+                                }}
+                            }});
+                        }}
+                    }}
+                    
+                    function updateOpacity(layerId, opacityValue) {{
+                        const opacity = opacityValue / 100;
+                        document.getElementById('value_' + layerId).textContent = opacityValue + '%';
+                        
+                        // Find and update the layer opacity
+                        if (window[window.map_var] && window[window.map_var].eachLayer) {{
+                            window[window.map_var].eachLayer(function(layer) {{
+                                if (layer.options && layer.options.name) {{
+                                    const layerName = layer.options.name;
+                                    const matchingLayerInfo = layerInfo.find(info => info.id === layerId);
+                                    if (matchingLayerInfo && layerName === matchingLayerInfo.name) {{
+                                        if (layer.setOpacity) {{
+                                            layer.setOpacity(opacity);
+                                        }}
+                                    }}
+                                }}
+                            }});
+                        }}
+                    }}
+                    
+                    // Find the map variable name
+                    window.map_var = null;
+                    for (let prop in window) {{
+                        if (window[prop] && typeof window[prop] === 'object' && window[prop]._container) {{
+                            window.map_var = prop;
+                            break;
+                        }}
+                    }}
+                </script>
+            </body>
+            </html>
+            """
+    
+            # Display the enhanced map with transparency controls
+            components.html(transparency_control_html, height=600)
     
             st.info("""
-            **Interactive Map Usage (Folium):**
-            - Click the **fullscreen button** (top-left) to view the map in fullscreen mode.
-            - Use the layer control in the top-right to toggle layers on/off.
-            - Switch between Google Satellite, Google Maps, and OpenStreetMap base layers.
-            - The map shows before classification in **green** and after classification in **red**.
-            - Change detection mask shows new buildings in **hot colors** (red/yellow).
-            - All layers are now perfectly aligned with the same extent.
-            - Click on the map to explore different areas.
+            **Enhanced Interactive Map Usage:**
+            - 🎛️ **Layer Controls Panel**: Use the panel on the right to control each layer individually
+            - ✅ **Toggle Layers**: Check/uncheck boxes to show/hide layers
+            - 🎚️ **Transparency Sliders**: Adjust the transparency of each layer from 0% to 100%
+            - 🔍 **Fullscreen**: Click the fullscreen button (top-left) for better viewing
+            - 🗺️ **Base Maps**: Switch between Google Satellite, Google Maps, and OpenStreetMap
+            - 🎨 **Color Coding**: 
+              - Before classification in **green**
+              - After classification in **red** 
+              - Change detection mask in **hot colors** (red/yellow)
+            - 📍 All layers are perfectly aligned and georeferenced
             """)
     
         except Exception as e:
@@ -2149,4 +2382,3 @@ with tab4: # This line is commented out as the code below is the content of tab4
             st.error(traceback.format_exc())
     else:
         st.info("After applying erosion, the interactive map will appear here.")
-    
