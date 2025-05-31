@@ -1646,7 +1646,7 @@ with tab3:
     else:
         st.info("No regions have been selected yet. Please go to the Region Selection tab and draw a polygon.")
 
-with tab4: # This line is commented out as the code below is the content of tab4
+with tab4:  # This line is commented out as the code below is the content of tab4
     st.header("Building Change Detection")
     
     # Import required libraries (ensure these are available in your environment)
@@ -2140,8 +2140,30 @@ with tab4: # This line is commented out as the code below is the content of tab4
                 center_lon = (target_bounds.left + target_bounds.right) / 2
                 center = [center_lat, center_lon]
                 
-                # Create map with no default tiles (tiles=None)
-                m = folium.Map(location=center, zoom_start=16, tiles=None)
+                # Create map with no default tiles and white background
+                m = folium.Map(
+                    location=center, 
+                    zoom_start=16, 
+                    tiles=None,
+                    # Add custom CSS for white background
+                    prefer_canvas=True
+                )
+                
+                # Add custom CSS to make the map background white
+                map_css = """
+                <style>
+                .leaflet-container {
+                    background-color: white !important;
+                }
+                .leaflet-tile-pane {
+                    background-color: white !important;
+                }
+                .leaflet-layer {
+                    background-color: white !important;
+                }
+                </style>
+                """
+                m.get_root().html.add_child(folium.Element(map_css))
                 
                 # Add fullscreen plugin
                 plugins.Fullscreen(
@@ -2149,14 +2171,25 @@ with tab4: # This line is commented out as the code below is the content of tab4
                     title_cancel='Exit fullscreen', force_separate_button=True
                 ).add_to(m)
 
-                # Add White Background as the first base layer (default)
-                folium.TileLayer(
-                    tiles='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==',
+                # Create a custom white tile layer using a proper white tile
+                white_tile_template = """
+                var whiteLayer = L.tileLayer('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVQIHWP4//8/AAX+Av7czFnnAAAAAElFTkSuQmCC', {
+                    attribution: 'White Background',
+                    minZoom: 1,
+                    maxZoom: 20,
+                    tileSize: 256
+                });
+                """
+                
+                # Add White Background as a proper tile layer
+                folium.raster_layers.TileLayer(
+                    tiles='https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}',
                     attr='White Background', 
                     name='White Background', 
                     overlay=False, 
                     control=True,
-                    show=True  # This will be the default selected background
+                    show=True,
+                    opacity=0.1  # Very low opacity to make it almost white
                 ).add_to(m)
 
                 # Add other base layers
@@ -2184,6 +2217,29 @@ with tab4: # This line is commented out as the code below is the content of tab4
                     overlay=False, 
                     control=True, 
                     show=False
+                ).add_to(m)
+
+                # Alternative approach: Create a completely custom white background
+                # Add a white rectangle covering the entire visible area
+                from folium import Rectangle
+                
+                # Calculate extended bounds for white background
+                lat_margin = abs(target_bounds.top - target_bounds.bottom) * 2
+                lon_margin = abs(target_bounds.right - target_bounds.left) * 2
+                
+                white_bounds = [
+                    [target_bounds.bottom - lat_margin, target_bounds.left - lon_margin],
+                    [target_bounds.top + lat_margin, target_bounds.right + lon_margin]
+                ]
+                
+                Rectangle(
+                    bounds=white_bounds,
+                    color='white',
+                    fill=True,
+                    fillColor='white',
+                    fillOpacity=1.0,
+                    weight=0,
+                    popup='White Background'
                 ).add_to(m)
 
                 # Add region boundary if available
@@ -2270,7 +2326,7 @@ with tab4: # This line is commented out as the code below is the content of tab4
                 - 🔄 **Layer Control**: Toggle layers on/off (top-right corner)
                 - 📱 **Fullscreen**: Click fullscreen button for better viewing
                 - 🌍 **Base Maps**: 
-                  - **White Background** (Default - No interference with your data)
+                  - **White Background** (Default - Clean white background everywhere)
                   - Google Satellite
                   - Google Maps
                   - OpenStreetMap
