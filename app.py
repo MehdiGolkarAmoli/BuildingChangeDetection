@@ -1646,32 +1646,6 @@ with tab3:
     else:
         st.info("No regions have been selected yet. Please go to the Region Selection tab and draw a polygon.")
 
-# Fourth tab - Change Detection
-# Assuming 'st' is your streamlit import (import streamlit as st)
-# Assuming 'np' is your numpy import (import numpy as np)
-# Assuming 'plt' is your matplotlib.pyplot import (import matplotlib.pyplot as plt)
-# Ensure 'apply_erosion' function is defined elsewhere or imported.
-
-# Example definition for apply_erosion if not already defined:
-# import cv2 # OpenCV for erosion
-# def apply_erosion(mask, kernel_size):
-#     kernel = np.ones((kernel_size, kernel_size), np.uint8)
-#     eroded_mask = cv2.erode(mask, kernel, iterations=1)
-#     return eroded_mask
-
-
-# Assuming 'st' is your streamlit import (import streamlit as st)
-# Assuming 'np' is your numpy import (import numpy as np)
-# Assuming 'plt' is your matplotlib.pyplot import (import matplotlib.pyplot as plt)
-# Ensure 'apply_erosion' function is defined elsewhere or imported.
-
-# Example definition for apply_erosion if not already defined:
-# import cv2 # OpenCV for erosion
-# def apply_erosion(mask, kernel_size):
-#     kernel = np.ones((kernel_size, kernel_size), np.uint8)
-#     eroded_mask = cv2.erode(mask, kernel, iterations=1)
-#     return eroded_mask
-
 
 # with tab4: # This line is commented out as the code below is the content of tab4
 st.header("Building Change Detection")
