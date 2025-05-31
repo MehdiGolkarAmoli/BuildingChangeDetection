@@ -361,7 +361,7 @@ else:
     st.stop()
 
 # Create tabs for different pages
-tab1, tab2, tab3, tab4 = st.tabs(["Region Selection", "Before Image Analysis", "After Image Analysis", "Change Detection"])
+tab1, tab2, tab3,  = st.tabs(["Region Selection", "Before Image Analysis", "After Image Analysis", "Change Detection"])
 
 # Global variables
 if 'drawn_polygons' not in st.session_state:
@@ -1648,6 +1648,7 @@ with tab3:
 
 # Fourth tab - Change Detection
 with tab4:
+    
     st.header("Building Change Detection")
 
     # Import required libraries
@@ -2407,7 +2408,6 @@ with tab4:
             st.error(traceback.format_exc())
     else:
         st.info("After applying erosion, the interactive map will appear here.")
-
 
 
 
