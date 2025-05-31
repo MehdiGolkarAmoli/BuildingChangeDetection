@@ -2095,13 +2095,13 @@ with tab4:
                 control=True
             ).add_to(m)
             
-            # Add None/White background option
+            # Add None/White background option - Fixed attribution
             folium.TileLayer(
-                tiles='',
+                tiles='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==',
                 name='None',
                 overlay=False,
                 control=True,
-                attr=''
+                attr='No basemap'
             ).add_to(m)
             
             # Add data layers
