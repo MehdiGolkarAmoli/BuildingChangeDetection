@@ -1745,8 +1745,8 @@ with tab4: # This line is commented out as the code below is the content of tab4
     
     # 6) Interactive Map only once we have eroded_result
     if "eroded_result" in st.session_state:
-        st.subheader("Interactive Map with Transparency Controls")
-        st.info("Use the layer control panel on the right to toggle layers on/off and adjust transparency with the sliders. Click the fullscreen button to view the map in fullscreen mode.")
+        st.subheader("Interactive Map")
+        st.info("Use the layer control in the top-right to toggle layers on/off and adjust opacity with the transparency sliders. Click the fullscreen button to view the map in fullscreen mode.")
     
         try:
             if ('region_number' in st.session_state and
@@ -2071,14 +2071,14 @@ with tab4: # This line is commented out as the code below is the content of tab4
                     img_str = base64.b64encode(img_buffer.getvalue()).decode()
                     return f"data:image/png;base64,{img_str}", bounds_latlon
     
-            # Create the folium map
+            # Create the map with unique IDs for each layer
             m = folium.Map(location=center, zoom_start=15, tiles=None)
             plugins.Fullscreen(
                 position='topleft', title='Expand to fullscreen',
                 title_cancel='Exit fullscreen', force_separate_button=True
             ).add_to(m)
     
-            # Add base layers with transparency controls
+            # Add base layers with unique identifiers
             google_satellite = folium.TileLayer(
                 tiles='https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', 
                 attr='Google Satellite', 
@@ -2086,6 +2086,15 @@ with tab4: # This line is commented out as the code below is the content of tab4
                 overlay=False, 
                 control=True
             )
+            google_satellite._template = folium.Template("""
+                {% macro script(this, kwargs) %}
+                    var {{ this.get_name() }} = L.tileLayer(
+                        '{{ this.tiles }}',
+                        {{ this.options|tojson }}
+                    ).addTo({{ this._parent.get_name() }});
+                    {{ this.get_name() }}.layerId = 'google_satellite';
+                {% endmacro %}
+            """)
             google_satellite.add_to(m)
             
             google_maps = folium.TileLayer(
@@ -2095,6 +2104,15 @@ with tab4: # This line is commented out as the code below is the content of tab4
                 overlay=False, 
                 control=True
             )
+            google_maps._template = folium.Template("""
+                {% macro script(this, kwargs) %}
+                    var {{ this.get_name() }} = L.tileLayer(
+                        '{{ this.tiles }}',
+                        {{ this.options|tojson }}
+                    ).addTo({{ this._parent.get_name() }});
+                    {{ this.get_name() }}.layerId = 'google_maps';
+                {% endmacro %}
+            """)
             google_maps.add_to(m)
             
             osm_layer = folium.TileLayer(
@@ -2104,30 +2122,23 @@ with tab4: # This line is commented out as the code below is the content of tab4
                 control=True, 
                 show=True
             )
+            osm_layer._template = folium.Template("""
+                {% macro script(this, kwargs) %}
+                    var {{ this.get_name() }} = L.tileLayer(
+                        '{{ this.tiles }}',
+                        {{ this.options|tojson }}
+                    ).addTo({{ this._parent.get_name() }});
+                    {{ this.get_name() }}.layerId = 'openstreetmap';
+                {% endmacro %}
+            """)
             osm_layer.add_to(m)
     
             # Store layer information for transparency controls
-            layer_info = []
-            
-            # Add base layer transparency controls
-            layer_info.append({
-                'name': 'Google Satellite',
-                'id': 'google_satellite',
-                'default_opacity': 1.0,
-                'type': 'base'
-            })
-            layer_info.append({
-                'name': 'Google Maps',
-                'id': 'google_maps',
-                'default_opacity': 1.0,
-                'type': 'base'
-            })
-            layer_info.append({
-                'name': 'OpenStreetMap',
-                'id': 'openstreetmap',
-                'default_opacity': 1.0,
-                'type': 'base'
-            })
+            layer_ids = {
+                'Google Satellite': 'google_satellite',
+                'Google Maps': 'google_maps', 
+                'OpenStreetMap': 'openstreetmap'
+            }
     
             if utm_crs is not None and utm_transform is not None:
                 if selected_polygon and 'region_number' in st.session_state:
@@ -2141,29 +2152,43 @@ with tab4: # This line is commented out as the code below is the content of tab4
                     try:
                         img_data_before_rgb, bounds_before_rgb = raster_to_folium_overlay(before_rgb_wgs84_path, opacity=0.8)
                         before_sentinel_layer = folium.raster_layers.ImageOverlay(
-                            image=img_data_before_rgb, bounds=bounds_before_rgb, 
-                            opacity=0.8, name=f"Before Sentinel-2 ({before_year})"
+                            image=img_data_before_rgb, 
+                            bounds=bounds_before_rgb, 
+                            opacity=0.8, 
+                            name=f"Before Sentinel-2 ({before_year})"
                         )
+                        before_sentinel_layer._template = folium.Template("""
+                            {% macro script(this, kwargs) %}
+                                var {{ this.get_name() }} = L.imageOverlay(
+                                    '{{ this.image }}',
+                                    {{ this.bounds }},
+                                    {{ this.options|tojson }}
+                                ).addTo({{ this._parent.get_name() }});
+                                {{ this.get_name() }}.layerId = 'before_sentinel';
+                            {% endmacro %}
+                        """)
                         before_sentinel_layer.add_to(m)
-                        layer_info.append({
-                            'name': f"Before Sentinel-2 ({before_year})",
-                            'id': f'before_sentinel_{before_year}',
-                            'default_opacity': 0.8,
-                            'type': 'overlay'
-                        })
+                        layer_ids[f"Before Sentinel-2 ({before_year})"] = 'before_sentinel'
                         
                         img_data_after_rgb, bounds_after_rgb = raster_to_folium_overlay(after_rgb_wgs84_path, opacity=0.8)
                         after_sentinel_layer = folium.raster_layers.ImageOverlay(
-                            image=img_data_after_rgb, bounds=bounds_after_rgb, 
-                            opacity=0.8, name=f"After Sentinel-2 ({after_year})"
+                            image=img_data_after_rgb, 
+                            bounds=bounds_after_rgb, 
+                            opacity=0.8, 
+                            name=f"After Sentinel-2 ({after_year})"
                         )
+                        after_sentinel_layer._template = folium.Template("""
+                            {% macro script(this, kwargs) %}
+                                var {{ this.get_name() }} = L.imageOverlay(
+                                    '{{ this.image }}',
+                                    {{ this.bounds }},
+                                    {{ this.options|tojson }}
+                                ).addTo({{ this._parent.get_name() }});
+                                {{ this.get_name() }}.layerId = 'after_sentinel';
+                            {% endmacro %}
+                        """)
                         after_sentinel_layer.add_to(m)
-                        layer_info.append({
-                            'name': f"After Sentinel-2 ({after_year})",
-                            'id': f'after_sentinel_{after_year}',
-                            'default_opacity': 0.8,
-                            'type': 'overlay'
-                        })
+                        layer_ids[f"After Sentinel-2 ({after_year})"] = 'after_sentinel'
                     except Exception as e:
                         st.warning(f"Could not add Sentinel-2 RGB layers: {str(e)}")
     
@@ -2171,16 +2196,23 @@ with tab4: # This line is commented out as the code below is the content of tab4
                     try:
                         img_data_before_class, bounds_before_class = raster_to_folium_overlay(before_class_wgs84_path, colormap='Greens', opacity=0.7, is_binary=True)
                         before_class_layer = folium.raster_layers.ImageOverlay(
-                            image=img_data_before_class, bounds=bounds_before_class, 
-                            opacity=0.7, name=f"Before Classification ({before_year})"
+                            image=img_data_before_class, 
+                            bounds=bounds_before_class, 
+                            opacity=0.7, 
+                            name=f"Before Classification ({before_year})"
                         )
+                        before_class_layer._template = folium.Template("""
+                            {% macro script(this, kwargs) %}
+                                var {{ this.get_name() }} = L.imageOverlay(
+                                    '{{ this.image }}',
+                                    {{ this.bounds }},
+                                    {{ this.options|tojson }}
+                                ).addTo({{ this._parent.get_name() }});
+                                {{ this.get_name() }}.layerId = 'before_classification';
+                            {% endmacro %}
+                        """)
                         before_class_layer.add_to(m)
-                        layer_info.append({
-                            'name': f"Before Classification ({before_year})",
-                            'id': f'before_class_{before_year}',
-                            'default_opacity': 0.7,
-                            'type': 'overlay'
-                        })
+                        layer_ids[f"Before Classification ({before_year})"] = 'before_classification'
                     except Exception as e:
                         st.warning(f"Could not add before classification layer: {str(e)}")
     
@@ -2188,33 +2220,47 @@ with tab4: # This line is commented out as the code below is the content of tab4
                     try:
                         img_data_after_class, bounds_after_class = raster_to_folium_overlay(after_class_wgs84_path, colormap='Reds', opacity=0.7, is_binary=True)
                         after_class_layer = folium.raster_layers.ImageOverlay(
-                            image=img_data_after_class, bounds=bounds_after_class, 
-                            opacity=0.7, name=f"After Classification ({after_year})"
+                            image=img_data_after_class, 
+                            bounds=bounds_after_class, 
+                            opacity=0.7, 
+                            name=f"After Classification ({after_year})"
                         )
+                        after_class_layer._template = folium.Template("""
+                            {% macro script(this, kwargs) %}
+                                var {{ this.get_name() }} = L.imageOverlay(
+                                    '{{ this.image }}',
+                                    {{ this.bounds }},
+                                    {{ this.options|tojson }}
+                                ).addTo({{ this._parent.get_name() }});
+                                {{ this.get_name() }}.layerId = 'after_classification';
+                            {% endmacro %}
+                        """)
                         after_class_layer.add_to(m)
-                        layer_info.append({
-                            'name': f"After Classification ({after_year})",
-                            'id': f'after_class_{after_year}',
-                            'default_opacity': 0.7,
-                            'type': 'overlay'
-                        })
+                        layer_ids[f"After Classification ({after_year})"] = 'after_classification'
                     except Exception as e:
                         st.warning(f"Could not add after classification layer: {str(e)}")
     
                 if change_mask_wgs84_path:
                     try:
                         img_data_change, bounds_change = raster_to_folium_overlay(change_mask_wgs84_path, colormap='hot', opacity=0.7)
-                        change_mask_layer = folium.raster_layers.ImageOverlay(
-                            image=img_data_change, bounds=bounds_change, 
-                            opacity=0.7, name=f"Change Detection Mask ({before_year}-{after_year})"
+                        change_layer = folium.raster_layers.ImageOverlay(
+                            image=img_data_change, 
+                            bounds=bounds_change, 
+                            opacity=0.7, 
+                            name=f"Change Detection Mask ({before_year}-{after_year})"
                         )
-                        change_mask_layer.add_to(m)
-                        layer_info.append({
-                            'name': f"Change Detection Mask ({before_year}-{after_year})",
-                            'id': f'change_mask_{before_year}_{after_year}',
-                            'default_opacity': 0.7,
-                            'type': 'overlay'
-                        })
+                        change_layer._template = folium.Template("""
+                            {% macro script(this, kwargs) %}
+                                var {{ this.get_name() }} = L.imageOverlay(
+                                    '{{ this.image }}',
+                                    {{ this.bounds }},
+                                    {{ this.options|tojson }}
+                                ).addTo({{ this._parent.get_name() }});
+                                {{ this.get_name() }}.layerId = 'change_detection';
+                            {% endmacro %}
+                        """)
+                        change_layer.add_to(m)
+                        layer_ids[f"Change Detection Mask ({before_year}-{after_year})"] = 'change_detection'
                     except Exception as e:
                         st.warning(f"Could not add change detection mask layer: {str(e)}")
     
@@ -2223,297 +2269,273 @@ with tab4: # This line is commented out as the code below is the content of tab4
             else:
                 st.warning("Cannot display non-georeferenced data in the interactive map.")
     
-            # Add the default layer control
             folium.LayerControl().add_to(m)
     
             # Get the map HTML
             map_html = m.get_root().render()
             
-            # Create custom transparency control panel HTML and JavaScript
-            transparency_control_html = f"""
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <style>
-                    .transparency-panel {{
-                        position: absolute;
-                        top: 10px;
-                        right: 10px;
-                        background: white;
-                        padding: 15px;
-                        border-radius: 8px;
-                        box-shadow: 0 2px 10px rgba(0,0,0,0.3);
-                        font-family: Arial, sans-serif;
-                        font-size: 12px;
-                        max-width: 300px;
-                        z-index: 1000;
-                        max-height: 500px;
-                        overflow-y: auto;
-                    }}
-                    
-                    .transparency-panel h4 {{
-                        margin: 0 0 15px 0;
-                        color: #333;
-                        font-size: 14px;
-                        border-bottom: 1px solid #ddd;
-                        padding-bottom: 8px;
-                    }}
-                    
-                    .layer-control {{
-                        margin-bottom: 12px;
-                        padding: 10px;
-                        border: 1px solid #e0e0e0;
-                        border-radius: 6px;
-                        background: #f9f9f9;
-                    }}
-                    
-                    .base-layer-control {{
-                        background: #e8f4fd;
-                        border-color: #b3d9ff;
-                    }}
-                    
-                    .layer-header {{
-                        display: flex;
-                        align-items: center;
-                        margin-bottom: 8px;
-                    }}
-                    
-                    .layer-checkbox {{
-                        margin-right: 8px;
-                    }}
-                    
-                    .layer-name {{
-                        font-weight: bold;
-                        color: #333;
-                        font-size: 11px;
-                        flex: 1;
-                    }}
-                    
-                    .transparency-slider {{
-                        width: 100%;
-                        margin-top: 5px;
-                    }}
-                    
-                    .opacity-value {{
-                        font-size: 10px;
-                        color: #666;
-                        text-align: center;
-                        margin-top: 2px;
-                    }}
-                    
-                    .slider-container {{
-                        display: flex;
-                        align-items: center;
-                        gap: 8px;
-                    }}
-                    
-                    .slider-label {{
-                        font-size: 10px;
-                        color: #666;
-                        min-width: 70px;
-                    }}
-                    
-                    .layer-type-label {{
-                        font-size: 9px;
-                        color: #888;
-                        font-style: italic;
-                    }}
-                </style>
-            </head>
-            <body>
+            # Create layer info for sliders with proper layer IDs
+            layer_info = []
+            default_opacities = {
+                'Google Satellite': 100,
+                'Google Maps': 100,
+                'OpenStreetMap': 100,
+                f"Before Sentinel-2 ({before_year})": 80,
+                f"After Sentinel-2 ({after_year})": 80,
+                f"Before Classification ({before_year})": 70,
+                f"After Classification ({after_year})": 70,
+                f"Change Detection Mask ({before_year}-{after_year})": 70
+            }
+            
+            for layer_name, layer_id in layer_ids.items():
+                if layer_name in default_opacities:
+                    layer_info.append({
+                        'name': layer_name,
+                        'id': layer_name.replace(' ', '_').replace('(', '').replace(')', '').replace('-', '_'),
+                        'layer_id': layer_id,
+                        'default_opacity': default_opacities[layer_name]
+                    })
+            
+            # Enhanced HTML with working transparency controls
+            custom_html = f"""
+            <style>
+                .opacity-control {{
+                    position: absolute;
+                    top: 10px;
+                    right: 10px;
+                    background: white;
+                    padding: 15px;
+                    border-radius: 8px;
+                    box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+                    z-index: 1000;
+                    max-height: 500px;
+                    overflow-y: auto;
+                    min-width: 280px;
+                    font-family: Arial, sans-serif;
+                }}
+                .opacity-control h4 {{
+                    margin: 0 0 15px 0;
+                    font-size: 16px;
+                    color: #333;
+                    border-bottom: 1px solid #eee;
+                    padding-bottom: 8px;
+                }}
+                .layer-opacity {{
+                    margin-bottom: 15px;
+                    padding: 10px;
+                    border: 1px solid #f0f0f0;
+                    border-radius: 6px;
+                    background: #fafafa;
+                }}
+                .layer-opacity label {{
+                    display: block;
+                    font-size: 13px;
+                    margin-bottom: 8px;
+                    font-weight: 600;
+                    color: #444;
+                }}
+                .slider-container {{
+                    display: flex;
+                    align-items: center;
+                    gap: 12px;
+                }}
+                .opacity-slider {{
+                    flex: 1;
+                    height: 8px;
+                    border-radius: 4px;
+                    background: #ddd;
+                    outline: none;
+                    -webkit-appearance: none;
+                    cursor: pointer;
+                }}
+                .opacity-slider::-webkit-slider-thumb {{
+                    -webkit-appearance: none;
+                    appearance: none;
+                    width: 20px;
+                    height: 20px;
+                    border-radius: 50%;
+                    background: #2196F3;
+                    cursor: pointer;
+                    box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+                    transition: all 0.2s ease;
+                }}
+                .opacity-slider::-webkit-slider-thumb:hover {{
+                    background: #1976D2;
+                    transform: scale(1.1);
+                }}
+                .opacity-slider::-moz-range-thumb {{
+                    width: 20px;
+                    height: 20px;
+                    border-radius: 50%;
+                    background: #2196F3;
+                    cursor: pointer;
+                    border: none;
+                    box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+                }}
+                .opacity-value {{
+                    font-size: 12px;
+                    color: #666;
+                    min-width: 40px;
+                    text-align: center;
+                    font-weight: bold;
+                    background: #e3f2fd;
+                    padding: 4px 8px;
+                    border-radius: 4px;
+                }}
+                .leaflet-control-layers {{
+                    margin-right: 300px !important;
+                }}
+            </style>
+            
+            <div id="map-container" style="position: relative; width: 100%; height: 650px;">
                 {map_html}
-                
-                <div class="transparency-panel" id="transparencyPanel">
-                    <h4>🎛️ Layer Controls</h4>
-                    <div id="layerControls">
-                        <!-- Layer controls will be populated by JavaScript -->
+                <div class="opacity-control">
+                    <h4>🎛️ Layer Transparency Control</h4>
+                    {"".join([f'''
+                    <div class="layer-opacity">
+                        <label for="{layer['id']}_slider">{layer['name']}</label>
+                        <div class="slider-container">
+                            <input type="range" id="{layer['id']}_slider" class="opacity-slider" 
+                                   min="0" max="100" value="{layer['default_opacity']}" 
+                                   data-layer-id="{layer['layer_id']}"
+                                   oninput="updateLayerOpacity('{layer['layer_id']}', this.value, '{layer['id']}')">
+                            <span id="{layer['id']}_value" class="opacity-value">{layer['default_opacity']}%</span>
+                        </div>
                     </div>
+                    ''' for layer in layer_info])}
                 </div>
+            </div>
+            
+            <script>
+                // Global variables
+                var mapInstance = null;
+                var layerRegistry = {{}};
+                var initAttempts = 0;
+                var maxInitAttempts = 10;
                 
-                <script>
-                    // Layer information
-                    const layerInfo = {json.dumps(layer_info)};
-                    let mapInstance = null;
-                    let layerRegistry = {{}};
-                    
-                    // Wait for map to be fully loaded
-                    setTimeout(function() {{
-                        initializeMap();
-                        initializeTransparencyControls();
-                    }}, 1500);
-                    
-                    function initializeMap() {{
-                        // Find the Leaflet map instance
-                        for (let prop in window) {{
-                            if (window[prop] && typeof window[prop] === 'object' && window[prop]._container && window[prop].eachLayer) {{
-                                mapInstance = window[prop];
-                                console.log('Found map instance:', prop);
-                                break;
-                            }}
+                function findMapInstance() {{
+                    // Find all map elements
+                    var mapElements = document.querySelectorAll('.folium-map');
+                    if (mapElements.length > 0) {{
+                        var mapElement = mapElements[mapElements.length - 1];
+                        if (mapElement._leaflet_id) {{
+                            mapInstance = window[mapElement._leaflet_id];
+                            console.log('Map instance found:', mapInstance);
+                            return true;
                         }}
+                    }}
+                    return false;
+                }}
+                
+                function registerLayers() {{
+                    if (!mapInstance) return false;
+                    
+                    // Clear existing registry
+                    layerRegistry = {{}};
+                    
+                    // Register all layers
+                    mapInstance.eachLayer(function(layer) {{
+                        if (layer.layerId) {{
+                            layerRegistry[layer.layerId] = layer;
+                            console.log('Registered layer:', layer.layerId, layer);
+                        }}
+                    }});
+                    
+                    console.log('Layer registry:', layerRegistry);
+                    return Object.keys(layerRegistry).length > 0;
+                }}
+                
+                function initializeMapControls() {{
+                    if (initAttempts >= maxInitAttempts) {{
+                        console.error('Failed to initialize map controls after', maxInitAttempts, 'attempts');
+                        return;
+                    }}
+                    
+                    initAttempts++;
+                    console.log('Initialization attempt:', initAttempts);
+                    
+                    if (!findMapInstance()) {{
+                        console.log('Map not ready, retrying...');
+                        setTimeout(initializeMapControls, 1000);
+                        return;
+                    }}
+                    
+                    if (!registerLayers()) {{
+                        console.log('Layers not ready, retrying...');
+                        setTimeout(initializeMapControls, 1000);
+                        return;
+                    }}
+                    
+                    console.log('Map controls initialized successfully!');
+                }}
+                
+                function updateLayerOpacity(layerId, value, elementId) {{
+                    var opacity = value / 100;
+                    
+                    // Update display value
+                    var valueElement = document.getElementById(elementId + '_value');
+                    if (valueElement) {{
+                        valueElement.textContent = value + '%';
+                    }}
+                    
+                    // Update layer opacity
+                    if (layerRegistry[layerId]) {{
+                        var layer = layerRegistry[layerId];
                         
-                        if (mapInstance) {{
-                            // Register all layers with their names
-                            mapInstance.eachLayer(function(layer) {{
-                                if (layer.options && layer.options.name) {{
-                                    layerRegistry[layer.options.name] = layer;
-                                    console.log('Registered layer:', layer.options.name);
+                        try {{
+                            if (layer.setOpacity) {{
+                                layer.setOpacity(opacity);
+                                console.log('Updated opacity for', layerId, 'to', opacity, 'using setOpacity');
+                            }} else if (layer.getContainer) {{
+                                var container = layer.getContainer();
+                                if (container) {{
+                                    container.style.opacity = opacity;
+                                    console.log('Updated opacity for', layerId, 'to', opacity, 'using container style');
                                 }}
-                            }});
-                        }}
-                    }}
-                    
-                    function initializeTransparencyControls() {{
-                        const controlsContainer = document.getElementById('layerControls');
-                        
-                        // Separate base layers and overlay layers
-                        const baseLayers = layerInfo.filter(layer => layer.type === 'base');
-                        const overlayLayers = layerInfo.filter(layer => layer.type === 'overlay');
-                        
-                        // Add base layers first
-                        if (baseLayers.length > 0) {{
-                            const baseHeader = document.createElement('div');
-                            baseHeader.innerHTML = '<strong style="color: #0066cc;">Base Layers</strong>';
-                            controlsContainer.appendChild(baseHeader);
-                            
-                            baseLayers.forEach(function(layer) {{
-                                createLayerControl(layer, controlsContainer, true);
-                            }});
-                        }}
-                        
-                        // Add overlay layers
-                        if (overlayLayers.length > 0) {{
-                            const overlayHeader = document.createElement('div');
-                            overlayHeader.innerHTML = '<strong style="color: #cc6600; margin-top: 15px; display: block;">Overlay Layers</strong>';
-                            controlsContainer.appendChild(overlayHeader);
-                            
-                            overlayLayers.forEach(function(layer) {{
-                                createLayerControl(layer, controlsContainer, false);
-                            }});
-                        }}
-                    }}
-                    
-                    function createLayerControl(layer, container, isBase) {{
-                        const layerDiv = document.createElement('div');
-                        layerDiv.className = isBase ? 'layer-control base-layer-control' : 'layer-control';
-                        
-                        const isVisible = isLayerVisible(layer.name);
-                        
-                        layerDiv.innerHTML = `
-                            <div class="layer-header">
-                                <input type="checkbox" class="layer-checkbox" id="checkbox_${{layer.id}}" 
-                                       ${{isVisible ? 'checked' : ''}} onchange="toggleLayer('${{layer.name}}', this.checked)">
-                                <label class="layer-name" for="checkbox_${{layer.id}}">${{layer.name}}</label>
-                            </div>
-                            <div class="layer-type-label">${{isBase ? 'Base Layer' : 'Overlay Layer'}}</div>
-                            <div class="slider-container">
-                                <span class="slider-label">Transparency:</span>
-                                <input type="range" class="transparency-slider" id="slider_${{layer.id}}" 
-                                       min="0" max="100" value="${{Math.round(layer.default_opacity * 100)}}"
-                                       oninput="updateOpacity('${{layer.name}}', this.value)">
-                            </div>
-                            <div class="opacity-value" id="value_${{layer.id}}">${{Math.round(layer.default_opacity * 100)}}%</div>
-                        `;
-                        container.appendChild(layerDiv);
-                    }}
-                    
-                    function isLayerVisible(layerName) {{
-                        if (!mapInstance) return false;
-                        const layer = layerRegistry[layerName];
-                        return layer && mapInstance.hasLayer(layer);
-                    }}
-                    
-                    function toggleLayer(layerName, isVisible) {{
-                        if (!mapInstance) {{
-                            console.error('Map instance not found');
-                            return;
-                        }}
-                        
-                        const layer = layerRegistry[layerName];
-                        if (!layer) {{
-                            console.error('Layer not found:', layerName);
-                            return;
-                        }}
-                        
-                        if (isVisible) {{
-                            if (!mapInstance.hasLayer(layer)) {{
-                                mapInstance.addLayer(layer);
-                                console.log('Added layer:', layerName);
+                            }} else if (layer._container) {{
+                                layer._container.style.opacity = opacity;
+                                console.log('Updated opacity for', layerId, 'to', opacity, 'using _container style');
                             }}
-                        }} else {{
-                            if (mapInstance.hasLayer(layer)) {{
-                                mapInstance.removeLayer(layer);
-                                console.log('Removed layer:', layerName);
-                            }}
+                        }} catch (error) {{
+                            console.error('Error updating opacity for', layerId, ':', error);
                         }}
+                    }} else {{
+                        console.warn('Layer not found in registry:', layerId);
+                        console.log('Available layers:', Object.keys(layerRegistry));
                     }}
-                    
-                    function updateOpacity(layerName, opacityValue) {{
-                        const opacity = opacityValue / 100;
-                        const layerId = layerInfo.find(info => info.name === layerName)?.id;
-                        if (layerId) {{
-                            document.getElementById('value_' + layerId).textContent = opacityValue + '%';
-                        }}
-                        
-                        if (!mapInstance) {{
-                            console.error('Map instance not found');
-                            return;
-                        }}
-                        
-                        const layer = layerRegistry[layerName];
-                        if (!layer) {{
-                            console.error('Layer not found:', layerName);
-                            return;
-                        }}
-                        
-                        // Update opacity for different layer types
-                        if (layer.setOpacity) {{
-                            layer.setOpacity(opacity);
-                            console.log('Updated opacity for', layerName, 'to', opacity);
-                        }} else if (layer.options) {{
-                            layer.options.opacity = opacity;
-                            // Force redraw for tile layers
-                            if (layer.redraw) {{
-                                layer.redraw();
-                            }}
-                            console.log('Updated opacity for tile layer', layerName, 'to', opacity);
-                        }}
-                    }}
-                    
-                    // Debug function to check layers
-                    function debugLayers() {{
-                        console.log('Map instance:', mapInstance);
-                        console.log('Layer registry:', layerRegistry);
-                        if (mapInstance) {{
-                            mapInstance.eachLayer(function(layer) {{
-                                console.log('Layer:', layer.options?.name || 'unnamed', layer);
-                            }});
-                        }}
-                    }}
-                    
-                    // Call debug function after initialization
-                    setTimeout(debugLayers, 2000);
-                </script>
-            </body>
-            </html>
+                }}
+                
+                // Initialize when DOM is ready
+                if (document.readyState === 'loading') {{
+                    document.addEventListener('DOMContentLoaded', function() {{
+                        setTimeout(initializeMapControls, 500);
+                    }});
+                }} else {{
+                    setTimeout(initializeMapControls, 500);
+                }}
+                
+                // Also try when window loads
+                window.addEventListener('load', function() {{
+                    setTimeout(initializeMapControls, 1000);
+                }});
+            </script>
             """
-    
-            # Display the enhanced map with transparency controls
-            components.html(transparency_control_html, height=600)
+            
+            components.html(custom_html, height=680)
     
             st.info("""
-            **Enhanced Interactive Map Usage:**
-            - 🎛️ **Layer Controls Panel**: Use the panel on the right to control each layer individually
-            - 🗺️ **Base Layers**: Control transparency of Google Satellite, Google Maps, and OpenStreetMap
-            - 🎨 **Overlay Layers**: Control classification and change detection layers
-            - ✅ **Toggle Layers**: Check/uncheck boxes to show/hide layers
-            - 🎚️ **Transparency Sliders**: Adjust the transparency of each layer from 0% to 100%
-            - 🔍 **Fullscreen**: Click the fullscreen button (top-left) for better viewing
-            - 📍 All layers are perfectly aligned and georeferenced
-            - 🎨 **Color Coding**: 
-              - Before classification in **green**
-              - After classification in **red** 
-              - Change detection mask in **hot colors** (red/yellow)
+            **Interactive Map Usage:**
+            - 🗺️ **Fullscreen**: Click the fullscreen button (top-left) to expand the map
+            - 🔄 **Layer Control**: Use the layer control (top-right) to toggle layers on/off
+            - 🎛️ **Transparency**: Use the transparency sliders (right panel) to adjust opacity of ALL layers including:
+              - **Google Satellite** (base layer)
+              - **Google Maps** (base layer) 
+              - **OpenStreetMap** (base layer)
+              - **Sentinel-2 RGB** images (before/after)
+              - **Classification layers** (green=before, red=after)
+              - **Change Detection** (hot colors for new buildings)
+            - 🎯 All layers are perfectly aligned and georeferenced
+            - 📱 Drag sliders to make layers transparent and see underlying data
             """)
     
         except Exception as e:
