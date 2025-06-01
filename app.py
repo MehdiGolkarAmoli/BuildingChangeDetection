@@ -2071,16 +2071,41 @@ with tab4: # This line is commented out as the code below is the content of tab4
                     img_str = base64.b64encode(img_buffer.getvalue()).decode()
                     return f"data:image/png;base64,{img_str}", bounds_latlon
     
+            # Create map with proper layer ordering
             m = folium.Map(location=center, zoom_start=15, tiles=None)
             plugins.Fullscreen(
                 position='topleft', title='Expand to fullscreen',
                 title_cancel='Exit fullscreen', force_separate_button=True
             ).add_to(m)
     
-            folium.TileLayer(tiles='https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', attr='Google Satellite', name='Google Satellite', overlay=False, control=True).add_to(m)
-            folium.TileLayer(tiles='https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}', attr='Google Maps', name='Google Maps', overlay=False, control=True).add_to(m)
-            folium.TileLayer(tiles='OpenStreetMap', name='OpenStreetMap', overlay=False, control=True, show=True).add_to(m)  # Default OSM shown
+            # FIRST: Add base layers (these will be at the bottom in layer control)
+            folium.TileLayer(
+                tiles='https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', 
+                attr='Google Satellite', 
+                name='Google Satellite', 
+                overlay=False, 
+                control=True
+            ).add_to(m)
+            
+            folium.TileLayer(
+                tiles='https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}', 
+                attr='Google Maps', 
+                name='Google Maps', 
+                overlay=False, 
+                control=True
+            ).add_to(m)
+            
+            # THIRD: Set OpenStreetMap with 50% opacity and make it default
+            folium.TileLayer(
+                tiles='OpenStreetMap', 
+                name='OpenStreetMap', 
+                overlay=False, 
+                control=True, 
+                show=True,
+                opacity=0.5  # 50% opacity as requested
+            ).add_to(m)
     
+            # Add data layers (overlays) - these will appear above base layers
             if utm_crs is not None and utm_transform is not None:
                 if selected_polygon and 'region_number' in st.session_state:
                     gdf = gpd.GeoDataFrame(geometry=[selected_polygon], crs="EPSG:4326")
@@ -2089,33 +2114,62 @@ with tab4: # This line is commented out as the code below is the content of tab4
                         style_function=lambda x: {'fillColor': 'transparent', 'color': 'red', 'weight': 2, 'fillOpacity': 0}
                     ).add_to(m)
     
+                # Add Sentinel-2 RGB layers (bottom overlay layers)
                 if has_sentinel_data and before_rgb_wgs84_path and after_rgb_wgs84_path:
                     try:
                         img_data_before_rgb, bounds_before_rgb = raster_to_folium_overlay(before_rgb_wgs84_path, opacity=0.8)
-                        folium.raster_layers.ImageOverlay(image=img_data_before_rgb, bounds=bounds_before_rgb, opacity=1.0, name=f"Before Sentinel-2 ({before_year})").add_to(m)  # Opacity handled in PNG
+                        folium.raster_layers.ImageOverlay(
+                            image=img_data_before_rgb, 
+                            bounds=bounds_before_rgb, 
+                            opacity=0.8, 
+                            name=f"Before Sentinel-2 ({before_year})"
+                        ).add_to(m)
+                        
                         img_data_after_rgb, bounds_after_rgb = raster_to_folium_overlay(after_rgb_wgs84_path, opacity=0.8)
-                        folium.raster_layers.ImageOverlay(image=img_data_after_rgb, bounds=bounds_after_rgb, opacity=1.0, name=f"After Sentinel-2 ({after_year})").add_to(m)  # Opacity handled in PNG
+                        folium.raster_layers.ImageOverlay(
+                            image=img_data_after_rgb, 
+                            bounds=bounds_after_rgb, 
+                            opacity=0.8, 
+                            name=f"After Sentinel-2 ({after_year})"
+                        ).add_to(m)
                     except Exception as e:
                         st.warning(f"Could not add Sentinel-2 RGB layers: {str(e)}")
     
+                # Add classification layers (middle overlay layers)
                 if before_class_wgs84_path:
                     try:
                         img_data_before_class, bounds_before_class = raster_to_folium_overlay(before_class_wgs84_path, colormap='Greens', opacity=0.7, is_binary=True)
-                        folium.raster_layers.ImageOverlay(image=img_data_before_class, bounds=bounds_before_class, opacity=1.0, name=f"Before Classification ({before_year})").add_to(m)  # Opacity handled in PNG
+                        folium.raster_layers.ImageOverlay(
+                            image=img_data_before_class, 
+                            bounds=bounds_before_class, 
+                            opacity=0.7, 
+                            name=f"Before Classification ({before_year})"
+                        ).add_to(m)
                     except Exception as e:
                         st.warning(f"Could not add before classification layer: {str(e)}")
     
                 if after_class_wgs84_path:
                     try:
                         img_data_after_class, bounds_after_class = raster_to_folium_overlay(after_class_wgs84_path, colormap='Reds', opacity=0.7, is_binary=True)
-                        folium.raster_layers.ImageOverlay(image=img_data_after_class, bounds=bounds_after_class, opacity=1.0, name=f"After Classification ({after_year})").add_to(m)  # Opacity handled in PNG
+                        folium.raster_layers.ImageOverlay(
+                            image=img_data_after_class, 
+                            bounds=bounds_after_class, 
+                            opacity=0.7, 
+                            name=f"After Classification ({after_year})"
+                        ).add_to(m)
                     except Exception as e:
                         st.warning(f"Could not add after classification layer: {str(e)}")
     
+                # Add change detection mask (top overlay layer)
                 if change_mask_wgs84_path:
                     try:
-                        img_data_change, bounds_change = raster_to_folium_overlay(change_mask_wgs84_path, colormap='hot', opacity=0.7)
-                        folium.raster_layers.ImageOverlay(image=img_data_change, bounds=bounds_change, opacity=1.0, name=f"Change Detection Mask ({before_year}-{after_year})").add_to(m)  # Opacity handled in PNG
+                        img_data_change, bounds_change = raster_to_folium_overlay(change_mask_wgs84_path, colormap='hot', opacity=0.8)
+                        folium.raster_layers.ImageOverlay(
+                            image=img_data_change, 
+                            bounds=bounds_change, 
+                            opacity=0.8, 
+                            name=f"Change Detection Mask ({before_year}-{after_year})"
+                        ).add_to(m)
                     except Exception as e:
                         st.warning(f"Could not add change detection mask layer: {str(e)}")
     
@@ -2124,22 +2178,24 @@ with tab4: # This line is commented out as the code below is the content of tab4
             else:
                 st.warning("Cannot display non-georeferenced data in the interactive map.")
     
-            folium.LayerControl().add_to(m)
+            # Add layer control at the end
+            folium.LayerControl(position='topright', collapsed=False).add_to(m)
     
-            # --- MODIFIED PART FOR DISPLAY ---
+            # Display the map
             map_html = m.get_root().render()
-            components.html(map_html, height=600)  # Use components.html
-            # --- END OF MODIFIED PART ---
+            components.html(map_html, height=600)
     
             st.info("""
-            **Interactive Map Usage (Folium):**
+            **Interactive Map Usage (Folium) - Updated Layer Order:**
+            - **Base Layers (Bottom):** Google Satellite, Google Maps, OpenStreetMap (50% opacity)
+            - **Overlay Layers (Top to Bottom):** Change Detection → Classifications → Sentinel-2 Images
             - Click the **fullscreen button** (top-left) to view the map in fullscreen mode.
-            - Use the layer control in the top-right to toggle layers on/off.
-            - Switch between Google Satellite, Google Maps, and OpenStreetMap base layers.
+            - Use the layer control in the top-right to toggle layers on/off and adjust visibility.
+            - Switch between base layers using the radio buttons in the layer control.
+            - Toggle overlay layers using checkboxes in the layer control.
             - The map shows before classification in **green** and after classification in **red**.
-            - Change detection mask shows new buildings in **hot colors** (red/yellow).
-            - All layers are now perfectly aligned with the same extent.
-            - Click on the map to explore different areas.
+            - Change detection mask shows new buildings in **hot colors** (red/yellow) and appears on top.
+            - All layers are properly aligned with correct z-index ordering.
             """)
     
         except Exception as e:
@@ -2148,4 +2204,3 @@ with tab4: # This line is commented out as the code below is the content of tab4
             st.error(traceback.format_exc())
     else:
         st.info("After applying erosion, the interactive map will appear here.")
-    
