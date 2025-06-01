@@ -63,8 +63,8 @@ def download_model_from_gdrive(gdrive_url, local_filename):
     try:
         # FIXED: Use the correct file ID from your URL
         # URL: https://drive.google.com/file/d/1m6EScw-mpBIvWV78h4pyjWq1OLQtn2ov/view?usp=drive_link
-        correct_file_id = "1m6EScw-mpBIvWV78h4pyjWq1OLQtn2ov"
-        
+        correct_file_id = "1Fgn4j61XQQEoc_TnaUE5ClWDnzoopDgJ"
+
         st.info(f"Downloading model from Google Drive (File ID: {correct_file_id})...")
         
         # Use gdown library which is more reliable for Google Drive downloads
@@ -690,7 +690,7 @@ def load_model(model_path):
     try:
         device = torch.device('cpu')
         model = smp.UnetPlusPlus(
-            encoder_name='timm-efficientnet-b7',
+            encoder_name='timm-efficientnet-b8',
             encoder_weights='imagenet',
             in_channels=12,  # 12 bands for Sentinel-2
             classes=1,
