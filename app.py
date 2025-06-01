@@ -1,4 +1,3 @@
-# Import non-streamlit packages first
 import os
 os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
 import numpy as np
@@ -234,7 +233,7 @@ def manual_download_fallback(file_id, local_filename):
 
 # CORRECTED: Updated model loading section with the correct URL and file ID
 gdrive_model_url = "https://drive.google.com/file/d/1Fgn4j61XQQEoc_TnaUE5ClWDnzoopDgJ/view?usp=sharing"
-model_path = "best_model_version_Unet++_v02_e8.pt"  # Updated filename to match your preference
+model_path = "best_model_version_Unet++_v02_.pt"  # Updated filename to match your preference
 
 # Download model if it doesn't exist locally
 if not os.path.exists(model_path):
