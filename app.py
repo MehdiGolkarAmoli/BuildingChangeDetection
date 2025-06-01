@@ -233,8 +233,8 @@ def manual_download_fallback(file_id, local_filename):
         return None
 
 # CORRECTED: Updated model loading section with the correct URL and file ID
-gdrive_model_url = "https://drive.google.com/file/d/1m6EScw-mpBIvWV78h4pyjWq1OLQtn2ov/view?usp=drive_link"
-model_path = "best_model_version_Unet++_v02_e7.pt"  # Updated filename to match your preference
+gdrive_model_url = "https://drive.google.com/file/d/1Fgn4j61XQQEoc_TnaUE5ClWDnzoopDgJ/view?usp=sharing"
+model_path = "best_model_version_Unet++_v02_e8.pt"  # Updated filename to match your preference
 
 # Download model if it doesn't exist locally
 if not os.path.exists(model_path):
