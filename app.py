@@ -1801,20 +1801,13 @@ with tab4: # This line is commented out as the code below is the content of tab4
     axs[1].imshow(binary_after, cmap="gray")
     axs[1].set_title(f"{after_year} Classification")
     axs[1].axis("off")
-    axs[2].imshow(raw_mask, cmap="hot")
+    axs[2].imshow(raw_mask, cmap="Blues")  # Changed from "hot" to "Blues"
     axs[2].set_title("New Buildings")
     axs[2].axis("off")
     st.pyplot(fig)
     
-    # 5) Erosion UI - ENHANCED WITH BETTER INFORMATION
+    # 5) Erosion UI
     st.subheader("Refine with Morphological Erosion")
-    
-    st.info("""
-    **Morphological Erosion** helps remove small noise and isolated pixels from the change detection mask:
-    - **Smaller kernel sizes (2-3)**: Remove small noise while preserving most buildings
-    - **Medium kernel sizes (4-5)**: Remove medium-sized noise and thin connections
-    - **Larger kernel sizes (7-9)**: More aggressive filtering, may remove small buildings
-    """)
     
     kernel = st.selectbox(
         "Kernel size",
@@ -1851,10 +1844,10 @@ with tab4: # This line is commented out as the code below is the content of tab4
 
         # Display comparison
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
-        ax1.imshow(raw_mask, cmap="hot")
+        ax1.imshow(raw_mask, cmap="Blues")  # Changed from "hot" to "Blues"
         ax1.set_title(f"Original Mask\n({total_change_pixels:,} change pixels)")
         ax1.axis("off")
-        ax2.imshow(eroded, cmap="hot")
+        ax2.imshow(eroded, cmap="Blues")  # Changed from "hot" to "Blues"
         ax2.set_title(f"Eroded (k={kernel})\n({eroded_change_pixels:,} change pixels)")
         ax2.axis("off")
         st.pyplot(fig)
@@ -2150,11 +2143,11 @@ with tab4: # This line is commented out as the code below is the content of tab4
                             rgba_array[mask_val, 0:3] = [255, 0, 0]  # R, G, B
                         rgba_array[mask_val, 3] = 180  # Alpha for non-transparent parts
                         pil_img = Image.fromarray(rgba_array, 'RGBA')
-                    elif colormap == 'hot' and data.max() > 1:  # Assuming change mask 0-255
+                    elif colormap == 'Blues' and data.max() > 1:  # Changed from 'hot' to 'Blues'
                         import matplotlib.cm as cm  # Moved import here
                         data_norm = data / 255.0
-                        cmap_hot = cm.get_cmap('hot')  # Use get_cmap
-                        rgba_array = cmap_hot(data_norm)
+                        cmap_blues = cm.get_cmap('Blues')  # Changed from 'hot' to 'Blues'
+                        rgba_array = cmap_blues(data_norm)
                         rgba_array[data == 0, 3] = 0    # Fully transparent for 0
                         rgba_array[data > 0, 3] = 0.8  # Semi-transparent for changes
                         rgba_array = (rgba_array * 255).astype(np.uint8)
@@ -2187,7 +2180,7 @@ with tab4: # This line is commented out as the code below is the content of tab4
                     img_str = base64.b64encode(img_buffer.getvalue()).decode()
                     return f"data:image/png;base64,{img_str}", bounds_latlon
 
-            # MODIFIED MAP CREATION - Google Maps opacity set to 70%
+            # MODIFIED MAP CREATION - Google Satellite opacity set to 90%
             m = folium.Map(location=center, zoom_start=15, tiles=None)
             plugins.Fullscreen(
                 position='topleft', title='Expand to fullscreen',
@@ -2198,7 +2191,7 @@ with tab4: # This line is commented out as the code below is the content of tab4
             folium.TileLayer(
                 tiles='https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', 
                 attr='Google Satellite', 
-                name='Google Satellite', 
+                name='Google Satellite (90%)',  # Updated name to reflect opacity
                 overlay=False,  # Base layer
                 control=True
             ).add_to(m)
@@ -2231,14 +2224,19 @@ with tab4: # This line is commented out as the code below is the content of tab4
                 opacity: 0.5 !important;
             }
             
+            /* Google Satellite opacity - 90% */
+            .leaflet-tile-pane .leaflet-layer[style*="lyrs=s"] {
+                opacity: 0.9 !important;
+            }
+            
             /* Google Maps opacity - 70% */
-            .leaflet-tile-pane .leaflet-layer[style*="google"] {
+            .leaflet-tile-pane .leaflet-layer[style*="lyrs=m"] {
                 opacity: 0.7 !important;
             }
             
-            /* More specific selector for Google Maps tiles */
+            /* More specific selector for Google tiles */
             .leaflet-tile-pane .leaflet-layer img[src*="google"] {
-                opacity: 0.7 !important;
+                opacity: inherit !important;
             }
             </style>
             """
@@ -2309,7 +2307,7 @@ with tab4: # This line is commented out as the code below is the content of tab4
                 # Change detection mask (top overlay)
                 if change_mask_wgs84_path:
                     try:
-                        img_data_change, bounds_change = raster_to_folium_overlay(change_mask_wgs84_path, colormap='hot', opacity=0.8)
+                        img_data_change, bounds_change = raster_to_folium_overlay(change_mask_wgs84_path, colormap='Blues', opacity=0.8)  # Changed from 'hot' to 'Blues'
                         folium.raster_layers.ImageOverlay(
                             image=img_data_change, 
                             bounds=bounds_change, 
@@ -2338,12 +2336,12 @@ with tab4: # This line is commented out as the code below is the content of tab4
             st.info("""
             **Interactive Map Usage:**
             - Click the **fullscreen button** (top-left) to view the map in fullscreen mode.
-            - **Base Layers (Lower Layer Editor)**: Choose one background - Google Satellite, Google Maps (70% opacity), or OpenStreetMap (50% opacity).
+            - **Base Layers (Lower Layer Editor)**: Choose one background - Google Satellite (90% opacity), Google Maps (70% opacity), or OpenStreetMap (50% opacity).
             - **Overlay Layers (Upper Layer Editor)**: Toggle data layers on/off - these appear above the base layer.
             - Layer order is correct: overlays appear above base layers.
-            - Google Maps opacity is set to 70% and OpenStreetMap opacity remains at 50%.
+            - Google Satellite opacity is set to 90%, Google Maps opacity is set to 70%, and OpenStreetMap opacity remains at 50%.
             - Before classification appears in **green**, after classification in **red**.
-            - Change detection mask shows new buildings in **hot colors** (red/yellow).
+            - Change detection mask shows new buildings in **blue colors**.
             - All layers are perfectly aligned with the same extent.
             """)
 
