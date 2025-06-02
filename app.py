@@ -1669,14 +1669,100 @@ with tab4: # This line is commented out as the code below is the content of tab4
     import numpy as np  # Ensure numpy is imported
     import matplotlib.pyplot as plt  # Ensure matplotlib is imported
     
-    # Example definition for apply_erosion if not already defined in your main script:
-    # You should have this function defined or imported appropriately.
-    # For demonstration, a simple placeholder:
+    # FIXED EROSION FUNCTION - Now properly implements morphological erosion
     def apply_erosion(mask, kernel_size_val):
-        # Replace with your actual cv2.erode or skimage.morphology.erosion implementation
-        # This is just a placeholder to make the code runnable
-        st.warning(f"apply_erosion function called with kernel_size {kernel_size_val}. Implement actual erosion.")
-        return mask  # Placeholder returns original mask
+        """
+        Apply morphological erosion to a binary mask.
+        
+        Args:
+            mask: Binary mask (0-255 values)
+            kernel_size_val: Size of the erosion kernel
+            
+        Returns:
+            Eroded mask
+        """
+        try:
+            # Try to use OpenCV first (most efficient)
+            import cv2
+            
+            # Convert mask to binary (0 or 1) if it's in 0-255 range
+            if mask.max() > 1:
+                binary_mask = (mask > 0).astype(np.uint8)
+            else:
+                binary_mask = mask.astype(np.uint8)
+            
+            # Create erosion kernel
+            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size_val, kernel_size_val))
+            
+            # Apply erosion
+            eroded = cv2.erode(binary_mask, kernel, iterations=1)
+            
+            # Convert back to 0-255 range to match original mask format
+            eroded = eroded * 255
+            
+            st.success(f"✅ Applied erosion with OpenCV using kernel size {kernel_size_val}")
+            return eroded.astype(mask.dtype)
+            
+        except ImportError:
+            try:
+                # Fallback to scipy if OpenCV is not available
+                from scipy import ndimage
+                from scipy.ndimage import binary_erosion
+                
+                # Convert mask to binary (0 or 1) if it's in 0-255 range
+                if mask.max() > 1:
+                    binary_mask = (mask > 0).astype(bool)
+                else:
+                    binary_mask = mask.astype(bool)
+                
+                # Create circular structuring element
+                y, x = np.ogrid[-kernel_size_val//2:kernel_size_val//2+1, 
+                                -kernel_size_val//2:kernel_size_val//2+1]
+                kernel = x*x + y*y <= (kernel_size_val//2)**2
+                
+                # Apply erosion
+                eroded = binary_erosion(binary_mask, structure=kernel)
+                
+                # Convert back to 0-255 range to match original mask format
+                eroded = eroded.astype(np.uint8) * 255
+                
+                st.success(f"✅ Applied erosion with SciPy using kernel size {kernel_size_val}")
+                return eroded.astype(mask.dtype)
+                
+            except ImportError:
+                # Manual implementation as last resort
+                st.warning("Neither OpenCV nor SciPy available. Using basic manual erosion (slower).")
+                
+                # Convert mask to binary (0 or 1) if it's in 0-255 range
+                if mask.max() > 1:
+                    binary_mask = (mask > 0).astype(np.uint8)
+                else:
+                    binary_mask = mask.astype(np.uint8)
+                
+                # Create a simple manual erosion
+                eroded = np.zeros_like(binary_mask)
+                pad_size = kernel_size_val // 2
+                
+                # Pad the image
+                padded = np.pad(binary_mask, pad_size, mode='constant', constant_values=0)
+                
+                # Apply erosion manually
+                for i in range(binary_mask.shape[0]):
+                    for j in range(binary_mask.shape[1]):
+                        # Check if all pixels in the kernel neighborhood are 1
+                        neighborhood = padded[i:i+kernel_size_val, j:j+kernel_size_val]
+                        if np.all(neighborhood == 1):
+                            eroded[i, j] = 1
+                
+                # Convert back to 0-255 range
+                eroded = eroded * 255
+                
+                st.info(f"Applied manual erosion using kernel size {kernel_size_val}")
+                return eroded.astype(mask.dtype)
+        
+        except Exception as e:
+            st.error(f"Error in erosion operation: {str(e)}")
+            return mask  # Return original mask if erosion fails
     
     
     # 1) Retrieve the processed classification arrays
@@ -1720,26 +1806,56 @@ with tab4: # This line is commented out as the code below is the content of tab4
     axs[2].axis("off")
     st.pyplot(fig)
     
-    # 5) Erosion UI
+    # 5) Erosion UI - ENHANCED WITH BETTER INFORMATION
     st.subheader("Refine with Morphological Erosion")
+    
+    st.info("""
+    **Morphological Erosion** helps remove small noise and isolated pixels from the change detection mask:
+    - **Smaller kernel sizes (2-3)**: Remove small noise while preserving most buildings
+    - **Medium kernel sizes (4-5)**: Remove medium-sized noise and thin connections
+    - **Larger kernel sizes (7-9)**: More aggressive filtering, may remove small buildings
+    """)
     
     kernel = st.selectbox(
         "Kernel size",
         [2, 3, 4, 5, 7, 9],
         index=0,
-        key="tab4_erosion_kernel_size"
+        key="tab4_erosion_kernel_size",
+        help="Larger kernel sizes will remove more noise but may also remove small valid buildings"
     )
     
+    # Show statistics about the raw mask
+    total_change_pixels = np.sum(raw_mask > 0)
+    total_pixels = raw_mask.size
+    change_percentage = (total_change_pixels / total_pixels) * 100
+    
+    st.write(f"**Raw Change Detection Statistics:**")
+    st.write(f"- Total pixels with changes: {total_change_pixels:,}")
+    st.write(f"- Change area percentage: {change_percentage:.3f}%")
+    
     if st.button("Apply Erosion", key="tab4_apply_erosion_btn"):
-        eroded = apply_erosion(raw_mask, kernel)  # Ensure apply_erosion is defined
-        st.session_state.eroded_result = eroded
+        with st.spinner(f"Applying morphological erosion with kernel size {kernel}..."):
+            eroded = apply_erosion(raw_mask, kernel)
+            st.session_state.eroded_result = eroded
+            
+            # Calculate statistics for eroded result
+            eroded_change_pixels = np.sum(eroded > 0)
+            eroded_change_percentage = (eroded_change_pixels / total_pixels) * 100
+            pixels_removed = total_change_pixels - eroded_change_pixels
+            removal_percentage = (pixels_removed / total_change_pixels) * 100 if total_change_pixels > 0 else 0
+            
+            st.write(f"**Erosion Results:**")
+            st.write(f"- Remaining change pixels: {eroded_change_pixels:,}")
+            st.write(f"- Remaining change percentage: {eroded_change_percentage:.3f}%")
+            st.write(f"- Pixels removed: {pixels_removed:,} ({removal_percentage:.1f}% reduction)")
 
+        # Display comparison
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
         ax1.imshow(raw_mask, cmap="hot")
-        ax1.set_title("Original Mask")
+        ax1.set_title(f"Original Mask\n({total_change_pixels:,} change pixels)")
         ax1.axis("off")
         ax2.imshow(eroded, cmap="hot")
-        ax2.set_title(f"Eroded (k={kernel})")
+        ax2.set_title(f"Eroded (k={kernel})\n({eroded_change_pixels:,} change pixels)")
         ax2.axis("off")
         st.pyplot(fig)
     
