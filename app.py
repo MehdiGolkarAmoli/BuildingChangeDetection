@@ -1746,7 +1746,7 @@ with tab4: # This line is commented out as the code below is the content of tab4
     # 6) Interactive Map only once we have eroded_result
     if "eroded_result" in st.session_state:
         st.subheader("Interactive Map")
-        st.info("Use the layer control in the top-right to toggle layers on/off and adjust opacity. Click the fullscreen button to view the map in fullscreen mode.")
+        st.info("Use the layer control in the top-right to toggle layers on/off and adjust . Click the fullscreen button to view the map in fullscreen mode.")
     
         try:
             if ('region_number' in st.session_state and
@@ -2165,11 +2165,11 @@ with tab4: # This line is commented out as the code below is the content of tab4
                 # Classification layers
                 if before_class_wgs84_path:
                     try:
-                        img_data_before_class, bounds_before_class = raster_to_folium_overlay(before_class_wgs84_path, colormap='Greens', opacity=0.7, is_binary=True)
+                        img_data_before_class, bounds_before_class = raster_to_folium_overlay(before_class_wgs84_path, colormap='Greens', opacity=0.8, is_binary=True)
                         folium.raster_layers.ImageOverlay(
                             image=img_data_before_class, 
                             bounds=bounds_before_class, 
-                            opacity=0.7, 
+                            opacity=0.8, 
                             name=f"Before Classification ({before_year})",
                             overlay=True,  # Overlay layer
                             control=True,
@@ -2180,11 +2180,11 @@ with tab4: # This line is commented out as the code below is the content of tab4
     
                 if after_class_wgs84_path:
                     try:
-                        img_data_after_class, bounds_after_class = raster_to_folium_overlay(after_class_wgs84_path, colormap='Reds', opacity=0.7, is_binary=True)
+                        img_data_after_class, bounds_after_class = raster_to_folium_overlay(after_class_wgs84_path, colormap='Reds', opacity=0.8, is_binary=True)
                         folium.raster_layers.ImageOverlay(
                             image=img_data_after_class, 
                             bounds=bounds_after_class, 
-                            opacity=0.7, 
+                            opacity=0.8, 
                             name=f"After Classification ({after_year})",
                             overlay=True,  # Overlay layer
                             control=True,
