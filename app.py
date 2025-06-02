@@ -1733,7 +1733,7 @@ with tab4: # This line is commented out as the code below is the content of tab4
     if st.button("Apply Erosion", key="tab4_apply_erosion_btn"):
         eroded = apply_erosion(raw_mask, kernel)  # Ensure apply_erosion is defined
         st.session_state.eroded_result = eroded
-    
+
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
         ax1.imshow(raw_mask, cmap="hot")
         ax1.set_title("Original Mask")
@@ -1747,7 +1747,7 @@ with tab4: # This line is commented out as the code below is the content of tab4
     if "eroded_result" in st.session_state:
         st.subheader("Interactive Map")
         st.info("Use the layer control in the top-right to toggle layers on/off and adjust . Click the fullscreen button to view the map in fullscreen mode.")
-    
+
         try:
             if ('region_number' in st.session_state and
                 'drawn_polygons' in st.session_state and
@@ -1758,14 +1758,14 @@ with tab4: # This line is commented out as the code below is the content of tab4
             else:
                 center = [35.6892, 51.3890]
                 selected_polygon = None
-    
+
             temp_dir = tempfile.gettempdir()
             has_sentinel_data = (
                 'clipped_img' in st.session_state and
                 'clipped_img_2024' in st.session_state and
                 'clipped_meta' in st.session_state
             )
-    
+
             if 'clipped_meta' in st.session_state:
                 utm_transform = st.session_state.clipped_meta['transform']
                 utm_crs = st.session_state.clipped_meta['crs']
@@ -1784,21 +1784,21 @@ with tab4: # This line is commented out as the code below is the content of tab4
                 utm_transform = None
                 utm_height = binary_before.shape[0]
                 utm_width = binary_before.shape[1]
-    
+
             before_class_wgs84_path = None
             after_class_wgs84_path = None
             change_mask_wgs84_path = None
             before_rgb_wgs84_path = None
             after_rgb_wgs84_path = None
-    
+
             target_transform = None
             target_width = None
             target_height = None
             target_bounds = None
-    
+
             if utm_crs is not None and utm_transform is not None:
                 dst_crs = 'EPSG:4326'
-    
+
                 before_class_utm_path = os.path.join(temp_dir, f"before_class_utm_{before_year}_{time.time()}.tif")
                 with rasterio.open(
                     before_class_utm_path, 'w', driver='GTiff',
@@ -1806,7 +1806,7 @@ with tab4: # This line is commented out as the code below is the content of tab4
                     count=1, dtype=binary_before.dtype, crs=utm_crs, transform=utm_transform
                 ) as dst:
                     dst.write(binary_before, 1)
-    
+
                 before_class_wgs84_path = os.path.join(temp_dir, f"before_class_wgs84_{before_year}_{time.time()}.tif")
                 with rasterio.open(before_class_utm_path) as src:
                     dst_transform_calc, dst_width_calc, dst_height_calc = calculate_default_transform(
@@ -1827,7 +1827,7 @@ with tab4: # This line is commented out as the code below is the content of tab4
                             resampling=Resampling.nearest
                         )
                         target_bounds = dst.bounds
-    
+
                 after_class_utm_path = os.path.join(temp_dir, f"after_class_utm_{after_year}_{time.time()}.tif")
                 with rasterio.open(
                     after_class_utm_path, 'w', driver='GTiff',
@@ -1835,7 +1835,7 @@ with tab4: # This line is commented out as the code below is the content of tab4
                     count=1, dtype=binary_after.dtype, crs=utm_crs, transform=utm_transform
                 ) as dst:
                     dst.write(binary_after, 1)
-    
+
                 after_class_wgs84_path = os.path.join(temp_dir, f"after_class_wgs84_{after_year}_{time.time()}.tif")
                 with rasterio.open(after_class_utm_path) as src:
                     dst_kwargs = src.meta.copy()
@@ -1850,7 +1850,7 @@ with tab4: # This line is commented out as the code below is the content of tab4
                             dst_transform=target_transform, dst_crs=dst_crs,
                             resampling=Resampling.nearest
                         )
-    
+
                 if "eroded_result" in st.session_state:
                     change_mask_utm_path = os.path.join(temp_dir, f"change_mask_utm_{time.time()}.tif")
                     with rasterio.open(
@@ -1859,7 +1859,7 @@ with tab4: # This line is commented out as the code below is the content of tab4
                         count=1, dtype=st.session_state.eroded_result.dtype, crs=utm_crs, transform=utm_transform
                     ) as dst:
                         dst.write(st.session_state.eroded_result, 1)
-    
+
                     change_mask_wgs84_path = os.path.join(temp_dir, f"change_mask_wgs84_{time.time()}.tif")
                     with rasterio.open(change_mask_utm_path) as src:
                         dst_kwargs = src.meta.copy()
@@ -1874,7 +1874,7 @@ with tab4: # This line is commented out as the code below is the content of tab4
                                 dst_transform=target_transform, dst_crs=dst_crs,
                                 resampling=Resampling.nearest
                             )
-    
+
                 if has_sentinel_data and target_bounds is not None:
                     before_sentinel_utm_path = os.path.join(temp_dir, f"before_sentinel_utm_{before_year}_{time.time()}.tif")
                     before_bands = st.session_state.clipped_img[:4, :, :]
@@ -1885,7 +1885,7 @@ with tab4: # This line is commented out as the code below is the content of tab4
                     ) as dst:
                         for i in range(4):
                             dst.write(before_bands[i], i+1)
-    
+
                     before_sentinel_wgs84_path = os.path.join(temp_dir, f"before_sentinel_wgs84_{before_year}_{time.time()}.tif")
                     with rasterio.open(before_sentinel_utm_path) as src:
                         dst_kwargs = src.meta.copy()
@@ -1901,7 +1901,7 @@ with tab4: # This line is commented out as the code below is the content of tab4
                                     dst_transform=target_transform, dst_crs='EPSG:4326',
                                     resampling=Resampling.bilinear
                                 )
-    
+
                     after_sentinel_utm_path = os.path.join(temp_dir, f"after_sentinel_utm_{after_year}_{time.time()}.tif")
                     after_bands = st.session_state.clipped_img_2024[:4, :, :]
                     with rasterio.open(
@@ -1911,7 +1911,7 @@ with tab4: # This line is commented out as the code below is the content of tab4
                     ) as dst:
                         for i in range(4):
                             dst.write(after_bands[i], i+1)
-    
+
                     after_sentinel_wgs84_path = os.path.join(temp_dir, f"after_sentinel_wgs84_{after_year}_{time.time()}.tif")
                     with rasterio.open(after_sentinel_utm_path) as src:
                         dst_kwargs = src.meta.copy()
@@ -1927,7 +1927,7 @@ with tab4: # This line is commented out as the code below is the content of tab4
                                     dst_transform=target_transform, dst_crs='EPSG:4326',
                                     resampling=Resampling.bilinear
                                 )
-    
+
                     before_rgb_wgs84_path = os.path.join(temp_dir, f"before_rgb_wgs84_{before_year}_{time.time()}.tif")
                     with rasterio.open(before_sentinel_wgs84_path) as src:
                         profile = src.profile.copy()
@@ -1943,7 +1943,7 @@ with tab4: # This line is commented out as the code below is the content of tab4
                                 else:
                                     rgb_data[i] = np.zeros_like(band_data, dtype=np.uint8)
                             dst.write(rgb_data)
-    
+
                     after_rgb_wgs84_path = os.path.join(temp_dir, f"after_rgb_wgs84_{after_year}_{time.time()}.tif")
                     with rasterio.open(after_sentinel_wgs84_path) as src:
                         profile = src.profile.copy()
@@ -1959,7 +1959,7 @@ with tab4: # This line is commented out as the code below is the content of tab4
                                 else:
                                     rgb_data[i] = np.zeros_like(band_data, dtype=np.uint8)
                             dst.write(rgb_data)
-    
+
                 st.subheader("Download Reprojected Data")
                 st.write("The following files have been reprojected from UTM to WGS84 coordinate system:")
                 col1, col2, col3 = st.columns(3)
@@ -2019,7 +2019,7 @@ with tab4: # This line is commented out as the code below is the content of tab4
                         file_name=f"change_mask_{before_year}_{after_year}.png", mime="image/png",
                         key="download_change_mask_png"
                     )
-    
+
             def raster_to_folium_overlay(raster_path, colormap='viridis', opacity=0.7, is_binary=False):
                 with rasterio.open(raster_path) as src:
                     data = src.read(1)
@@ -2051,7 +2051,7 @@ with tab4: # This line is commented out as the code below is the content of tab4
                             if rgb_data_src.dtype != np.uint8:
                                 # Simple scaling if not uint8, assumes it's scaled appropriately before saving
                                 rgb_data_src = np.clip(rgb_data_src, 0, 255).astype(np.uint8) if np.issubdtype(rgb_data_src.dtype, np.integer) else (rgb_data_src / rgb_data_src.max() * 255).astype(np.uint8)
-    
+
                             img_array_rgb = np.transpose(rgb_data_src, (1, 2, 0))
                             pil_img = Image.fromarray(img_array_rgb)
                         else:  # Single band, general colormap (e.g., viridis if not specified)
@@ -2065,19 +2065,19 @@ with tab4: # This line is commented out as the code below is the content of tab4
                             img_array_cmap = cmap_viridis(data_norm)
                             img_array_cmap = (img_array_cmap[:, :, :3] * 255).astype(np.uint8)
                             pil_img = Image.fromarray(img_array_cmap)
-    
+
                     img_buffer = io.BytesIO()
                     pil_img.save(img_buffer, format='PNG')
                     img_str = base64.b64encode(img_buffer.getvalue()).decode()
                     return f"data:image/png;base64,{img_str}", bounds_latlon
-    
-            # MODIFIED MAP CREATION - FIXED LAYER ORDER AND OPACITY
+
+            # MODIFIED MAP CREATION - Google Maps opacity set to 70%
             m = folium.Map(location=center, zoom_start=15, tiles=None)
             plugins.Fullscreen(
                 position='topleft', title='Expand to fullscreen',
                 title_cancel='Exit fullscreen', force_separate_button=True
             ).add_to(m)
-    
+
             # BASE LAYERS (Lower layer editor) - These are mutually exclusive background layers
             folium.TileLayer(
                 tiles='https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', 
@@ -2087,13 +2087,15 @@ with tab4: # This line is commented out as the code below is the content of tab4
                 control=True
             ).add_to(m)
             
-            folium.TileLayer(
+            # Google Maps with 70% opacity using custom CSS
+            google_maps_layer = folium.TileLayer(
                 tiles='https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}', 
                 attr='Google Maps', 
-                name='Google Maps', 
+                name='Google Maps (70%)', 
                 overlay=False,  # Base layer
                 control=True
-            ).add_to(m)
+            )
+            google_maps_layer.add_to(m)
             
             # OpenStreetMap with 50% opacity using custom CSS
             osm_layer = folium.TileLayer(
@@ -2105,36 +2107,31 @@ with tab4: # This line is commented out as the code below is the content of tab4
             )
             osm_layer.add_to(m)
             
-            # Add custom CSS to reduce OpenStreetMap opacity to 50%
-            osm_css = """
+            # Add custom CSS to control opacity for different base layers
+            custom_css = """
             <style>
+            /* OpenStreetMap opacity - 50% */
             .leaflet-tile-pane .leaflet-layer:last-child {
                 opacity: 0.5 !important;
             }
+            
+            /* Google Maps opacity - 70% */
+            .leaflet-tile-pane .leaflet-layer[style*="google"] {
+                opacity: 0.7 !important;
+            }
+            
+            /* More specific selector for Google Maps tiles */
+            .leaflet-tile-pane .leaflet-layer img[src*="google"] {
+                opacity: 0.7 !important;
+            }
             </style>
             """
-            m.get_root().html.add_child(folium.Element(osm_css))
-    
+            m.get_root().html.add_child(folium.Element(custom_css))
+
             # OVERLAY LAYERS (Upper layer editor) - These stack on top of base layers
             # Add layers in reverse order of desired display (last added appears on top)
             
             if utm_crs is not None and utm_transform is not None:
-                # Selected region polygon (bottom overlay)
-                if selected_polygon and 'region_number' in st.session_state:
-                    gdf = gpd.GeoDataFrame(geometry=[selected_polygon], crs="EPSG:4326")
-                    folium.GeoJson(
-                        gdf.to_json(), 
-                        name="Selected Region",
-                        style_function=lambda x: {
-                            'fillColor': 'transparent', 
-                            'color': 'red', 
-                            'weight': 2, 
-                            'fillOpacity': 0
-                        },
-                        overlay=True,  # Overlay layer
-                        control=True
-                    ).add_to(m)
-    
                 # Sentinel RGB layers
                 if has_sentinel_data and before_rgb_wgs84_path and after_rgb_wgs84_path:
                     try:
@@ -2161,7 +2158,7 @@ with tab4: # This line is commented out as the code below is the content of tab4
                         ).add_to(m)
                     except Exception as e:
                         st.warning(f"Could not add Sentinel-2 RGB layers: {str(e)}")
-    
+
                 # Classification layers
                 if before_class_wgs84_path:
                     try:
@@ -2177,7 +2174,7 @@ with tab4: # This line is commented out as the code below is the content of tab4
                         ).add_to(m)
                     except Exception as e:
                         st.warning(f"Could not add before classification layer: {str(e)}")
-    
+
                 if after_class_wgs84_path:
                     try:
                         img_data_after_class, bounds_after_class = raster_to_folium_overlay(after_class_wgs84_path, colormap='Reds', opacity=0.8, is_binary=True)
@@ -2192,7 +2189,7 @@ with tab4: # This line is commented out as the code below is the content of tab4
                         ).add_to(m)
                     except Exception as e:
                         st.warning(f"Could not add after classification layer: {str(e)}")
-    
+
                 # Change detection mask (top overlay)
                 if change_mask_wgs84_path:
                     try:
@@ -2208,32 +2205,32 @@ with tab4: # This line is commented out as the code below is the content of tab4
                         ).add_to(m)
                     except Exception as e:
                         st.warning(f"Could not add change detection mask layer: {str(e)}")
-    
+
                 # Fit map to bounds
                 if target_bounds:
                     m.fit_bounds([[target_bounds.bottom, target_bounds.left], [target_bounds.top, target_bounds.right]])
             else:
                 st.warning("Cannot display non-georeferenced data in the interactive map.")
-    
+
             # Add layer control - this will now properly separate base layers from overlays
             folium.LayerControl(position='topright', collapsed=False).add_to(m)
-    
+
             # Display the map
             map_html = m.get_root().render()
             components.html(map_html, height=600)
-    
+
             st.info("""
-            **Interactive Map Usage (Fixed Layer Order):**
+            **Interactive Map Usage:**
             - Click the **fullscreen button** (top-left) to view the map in fullscreen mode.
-            - **Base Layers (Lower Layer Editor)**: Choose one background - Google Satellite, Google Maps, or OpenStreetMap (50% opacity).
+            - **Base Layers (Lower Layer Editor)**: Choose one background - Google Satellite, Google Maps (70% opacity), or OpenStreetMap (50% opacity).
             - **Overlay Layers (Upper Layer Editor)**: Toggle data layers on/off - these appear above the base layer.
-            - Layer order is now correct: overlays appear above base layers.
-            - OpenStreetMap opacity is reduced to 50% as requested.
+            - Layer order is correct: overlays appear above base layers.
+            - Google Maps opacity is set to 70% and OpenStreetMap opacity remains at 50%.
             - Before classification appears in **green**, after classification in **red**.
             - Change detection mask shows new buildings in **hot colors** (red/yellow).
             - All layers are perfectly aligned with the same extent.
             """)
-    
+
         except Exception as e:
             st.error(f"Error creating interactive map: {str(e)}")
             import traceback
