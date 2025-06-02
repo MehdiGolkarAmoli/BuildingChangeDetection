@@ -2150,11 +2150,11 @@ with tab4: # This line is commented out as the code below is the content of tab4
                             rgba_array[mask_val, 0:3] = [255, 0, 0]  # R, G, B
                         rgba_array[mask_val, 3] = 180  # Alpha for non-transparent parts
                         pil_img = Image.fromarray(rgba_array, 'RGBA')
-                    elif colormap == 'hot' and data.max() > 1:  # Assuming change mask 0-255
+                    elif colormap == 'Blues' and data.max() > 1:  # CHANGED: Use Blues for interactive map change detection
                         import matplotlib.cm as cm  # Moved import here
                         data_norm = data / 255.0
-                        cmap_hot = cm.get_cmap('hot')  # Use get_cmap
-                        rgba_array = cmap_hot(data_norm)
+                        cmap_blues = cm.get_cmap('Blues')  # Use Blues colormap for interactive map
+                        rgba_array = cmap_blues(data_norm)
                         rgba_array[data == 0, 3] = 0    # Fully transparent for 0
                         rgba_array[data > 0, 3] = 0.8  # Semi-transparent for changes
                         rgba_array = (rgba_array * 255).astype(np.uint8)
@@ -2317,10 +2317,10 @@ with tab4: # This line is commented out as the code below is the content of tab4
                     except Exception as e:
                         st.warning(f"Could not add after classification layer: {str(e)}")
 
-                # Change detection mask (top overlay)
+                # Change detection mask (top overlay) - CHANGED TO USE BLUES COLORMAP
                 if change_mask_wgs84_path:
                     try:
-                        img_data_change, bounds_change = raster_to_folium_overlay(change_mask_wgs84_path, colormap='hot', opacity=0.8)
+                        img_data_change, bounds_change = raster_to_folium_overlay(change_mask_wgs84_path, colormap='Blues', opacity=0.8)  # Changed from 'hot' to 'Blues'
                         folium.raster_layers.ImageOverlay(
                             image=img_data_change, 
                             bounds=bounds_change, 
@@ -2355,7 +2355,7 @@ with tab4: # This line is commented out as the code below is the content of tab4
             - Google Satellite remains at full opacity (100%) for clear satellite imagery.
             - Google Maps opacity is set to 70% and OpenStreetMap opacity remains at 50%.
             - Before classification appears in **green**, after classification in **red**.
-            - Change detection mask shows new buildings in **hot colors** (red/yellow).
+            - Change detection mask shows new buildings in **blue colors**.
             - All layers are perfectly aligned with the same extent.
             """)
 
