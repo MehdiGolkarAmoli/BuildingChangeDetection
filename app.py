@@ -1551,12 +1551,12 @@ with tab2:
             else:
                 st.error("There is no proper image for download. Try increasing the cloud cover percentage or selecting a different region or time period.")
         
-        # Show current status
+        # Show  status
         if 'reconstructed_before_image' in st.session_state and st.session_state.reconstructed_before_image is not None:
             st.success("✅ 'Before' image has already been processed successfully.")
             
             # Show the reconstructed image
-            st.subheader("Current 'Before' Classification Result")
+            st.subheader(" 'Before' Classification Result")
             fig, ax = plt.subplots(figsize=(8, 8))
             ax.imshow(st.session_state.reconstructed_before_image, cmap='gray')
             ax.set_title(f"{year} Building Classification")
@@ -1631,7 +1631,7 @@ with tab3:
             else:
                 st.error("There is no proper image for download. Try increasing the cloud cover percentage or selecting a different region or time period.")
         
-        # Show current status
+        # Show  status
         if 'reconstructed_after_image' in st.session_state and st.session_state.reconstructed_after_image is not None:
             st.success("✅ 'After' image has already been processed successfully.")
             
@@ -1801,7 +1801,7 @@ with tab4: # This line is commented out as the code below is the content of tab4
     axs[1].imshow(binary_after, cmap="gray")
     axs[1].set_title(f"{after_year} Classification")
     axs[1].axis("off")
-    axs[2].imshow(raw_mask, cmap="Blues")  # Changed from "hot" to "Blues"
+    axs[2].imshow(raw_mask, cmap="gray")  # Changed back to "gray" for matplotlib plots
     axs[2].set_title("New Buildings")
     axs[2].axis("off")
     st.pyplot(fig)
@@ -1844,10 +1844,10 @@ with tab4: # This line is commented out as the code below is the content of tab4
 
         # Display comparison
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
-        ax1.imshow(raw_mask, cmap="Blues")  # Changed from "hot" to "Blues"
+        ax1.imshow(raw_mask, cmap="gray")  # Changed back to "gray" for matplotlib plots
         ax1.set_title(f"Original Mask\n({total_change_pixels:,} change pixels)")
         ax1.axis("off")
-        ax2.imshow(eroded, cmap="Blues")  # Changed from "hot" to "Blues"
+        ax2.imshow(eroded, cmap="gray")  # Changed back to "gray" for matplotlib plots
         ax2.set_title(f"Eroded (k={kernel})\n({eroded_change_pixels:,} change pixels)")
         ax2.axis("off")
         st.pyplot(fig)
@@ -2143,10 +2143,10 @@ with tab4: # This line is commented out as the code below is the content of tab4
                             rgba_array[mask_val, 0:3] = [255, 0, 0]  # R, G, B
                         rgba_array[mask_val, 3] = 180  # Alpha for non-transparent parts
                         pil_img = Image.fromarray(rgba_array, 'RGBA')
-                    elif colormap == 'Blues' and data.max() > 1:  # Changed from 'hot' to 'Blues'
+                    elif colormap == 'Blues' and data.max() > 1:  # Blue colormap for change detection in interactive map
                         import matplotlib.cm as cm  # Moved import here
                         data_norm = data / 255.0
-                        cmap_blues = cm.get_cmap('Blues')  # Changed from 'hot' to 'Blues'
+                        cmap_blues = cm.get_cmap('Blues')  # Use Blues colormap for interactive map
                         rgba_array = cmap_blues(data_norm)
                         rgba_array[data == 0, 3] = 0    # Fully transparent for 0
                         rgba_array[data > 0, 3] = 0.8  # Semi-transparent for changes
@@ -2304,10 +2304,10 @@ with tab4: # This line is commented out as the code below is the content of tab4
                     except Exception as e:
                         st.warning(f"Could not add after classification layer: {str(e)}")
 
-                # Change detection mask (top overlay)
+                # Change detection mask (top overlay) - BLUE ONLY IN INTERACTIVE MAP
                 if change_mask_wgs84_path:
                     try:
-                        img_data_change, bounds_change = raster_to_folium_overlay(change_mask_wgs84_path, colormap='Blues', opacity=0.8)  # Changed from 'hot' to 'Blues'
+                        img_data_change, bounds_change = raster_to_folium_overlay(change_mask_wgs84_path, colormap='Blues', opacity=0.8)  # Blues colormap for interactive map
                         folium.raster_layers.ImageOverlay(
                             image=img_data_change, 
                             bounds=bounds_change, 
