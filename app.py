@@ -2320,7 +2320,7 @@ with tab4: # This line is commented out as the code below is the content of tab4
                 # Change detection mask (top overlay) - CHANGED TO USE BLUES COLORMAP
                 if change_mask_wgs84_path:
                     try:
-                        img_data_change, bounds_change = raster_to_folium_overlay(change_mask_wgs84_path, colormap='pink', opacity=0.8)  # Changed from 'hot' to 'Blues'
+                        img_data_change, bounds_change = raster_to_folium_overlay(change_mask_wgs84_path, colormap='Blue', opacity=0.8)  # Changed from 'hot' to 'Blues'
                         folium.raster_layers.ImageOverlay(
                             image=img_data_change, 
                             bounds=bounds_change, 
