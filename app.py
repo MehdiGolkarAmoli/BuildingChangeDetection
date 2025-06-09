@@ -360,7 +360,7 @@ else:
     """)
     st.stop()
 # Create tabs for different pages
-tab1, tab2, tab3, tab4  = st.tabs(["Region Selection", "Before Image Analysis", "After Image Analysis", "Change Detection"])
+tab1, tab2, tab3,   = st.tabs(["Region Selection", "Before Image Analysis", "After Image Analysis", "Change Detection"])
 
 # Global variables
 if 'drawn_polygons' not in st.session_state:
@@ -1810,7 +1810,7 @@ with tab4: # This line is commented out as the code below is the content of tab4
     st.subheader("Refine with Morphological Erosion")
     
     st.info("""
-    **Morphological Erosion** helps remove small noise and isolated pixels from the :
+    **Morphological Erosion** helps remove small noise and isolated pixels from the change detection:
     - **Smaller kernel sizes (2-3)**: Remove small noise while preserving most buildings
     - **Medium kernel sizes (4-5)**: Remove medium-sized noise and thin connections
     - **Larger kernel sizes (7-9)**: More aggressive filtering, may remove small buildings
@@ -1862,7 +1862,7 @@ with tab4: # This line is commented out as the code below is the content of tab4
     # 6) Interactive Map only once we have eroded_result
     if "eroded_result" in st.session_state:
         st.subheader("Interactive Map")
-        st.info("Use the layer control in the top-right to toggle layers on/off and adjust . Click the fullscreen button to view the map in fullscreen mode.")
+        st.info("Use the layer control in the top-right to toggle layers on/off and adjust opacity. Click the fullscreen button to view the map in fullscreen mode.")
 
         try:
             if ('region_number' in st.session_state and
@@ -2136,7 +2136,7 @@ with tab4: # This line is commented out as the code below is the content of tab4
                         key="download_change_mask_png"
                     )
 
-            def raster_to_folium_overlay(raster_path, colormap='viridis', opacity=0.7, is_binary=False):
+            def raster_to_folium_overlay(raster_path, colormap='viridis', opacity=0.7, is_binary=False, is_change_mask=False):
                 with rasterio.open(raster_path) as src:
                     data = src.read(1)
                     bounds = src.bounds
@@ -2150,14 +2150,11 @@ with tab4: # This line is commented out as the code below is the content of tab4
                             rgba_array[mask_val, 0:3] = [255, 0, 0]  # R, G, B
                         rgba_array[mask_val, 3] = 180  # Alpha for non-transparent parts
                         pil_img = Image.fromarray(rgba_array, 'RGBA')
-                    elif colormap == 'Blues' and data.max() > 1:  # CHANGED: Use Blues for interactive map change detection
-                        import matplotlib.cm as cm  # Moved import here
-                        data_norm = data / 255.0
-                        cmap_blues = cm.get_cmap('Blues')  # Use Blues colormap for interactive map
-                        rgba_array = cmap_blues(data_norm)
-                        rgba_array[data == 0, 3] = 0    # Fully transparent for 0
-                        rgba_array[data > 0, 3] = 0.8  # Semi-transparent for changes
-                        rgba_array = (rgba_array * 255).astype(np.uint8)
+                    elif is_change_mask and data.max() > 1:  # CHANGED: Special handling for change mask with light pink
+                        rgba_array = np.zeros((data.shape[0], data.shape[1], 4), dtype=np.uint8)
+                        mask_val = data > 0
+                        rgba_array[mask_val, 0:3] = [255, 182, 193]  # Light pink RGB values
+                        rgba_array[mask_val, 3] = 200  # Semi-transparent for changes
                         pil_img = Image.fromarray(rgba_array, 'RGBA')
                     else:  # For RGB Sentinel or other single band with general colormap
                         if src.count == 3:  # RGB
@@ -2317,10 +2314,10 @@ with tab4: # This line is commented out as the code below is the content of tab4
                     except Exception as e:
                         st.warning(f"Could not add after classification layer: {str(e)}")
 
-                #  (top overlay) - CHANGED TO USE BLUES COLORMAP
+                # Change detection mask (top overlay) - CHANGED TO USE LIGHT PINK
                 if change_mask_wgs84_path:
                     try:
-                        img_data_change, bounds_change = raster_to_folium_overlay(change_mask_wgs84_path, colormap='coolwarm', opacity=0.8)  # Changed from 'hot' to 'Blues'
+                        img_data_change, bounds_change = raster_to_folium_overlay(change_mask_wgs84_path, opacity=0.8, is_change_mask=True)  # Changed to use is_change_mask=True
                         folium.raster_layers.ImageOverlay(
                             image=img_data_change, 
                             bounds=bounds_change, 
@@ -2355,7 +2352,7 @@ with tab4: # This line is commented out as the code below is the content of tab4
             - Google Satellite remains at full opacity (100%) for clear satellite imagery.
             - Google Maps opacity is set to 70% and OpenStreetMap opacity remains at 50%.
             - Before classification appears in **green**, after classification in **red**.
-            - Change detection mask shows new buildings in **blue colors**.
+            - Change detection mask shows new buildings in **light pink**.
             - All layers are perfectly aligned with the same extent.
             """)
 
