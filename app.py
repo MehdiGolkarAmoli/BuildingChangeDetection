@@ -1810,7 +1810,7 @@ with tab4: # This line is commented out as the code below is the content of tab4
     st.subheader("Refine with Morphological Erosion")
     
     st.info("""
-    **Morphological Erosion** helps remove small noise and isolated pixels from the change detection mask:
+    **Morphological Erosion** helps remove small noise and isolated pixels from the :
     - **Smaller kernel sizes (2-3)**: Remove small noise while preserving most buildings
     - **Medium kernel sizes (4-5)**: Remove medium-sized noise and thin connections
     - **Larger kernel sizes (7-9)**: More aggressive filtering, may remove small buildings
@@ -2320,7 +2320,7 @@ with tab4: # This line is commented out as the code below is the content of tab4
                 # Change detection mask (top overlay) - CHANGED TO USE BLUES COLORMAP
                 if change_mask_wgs84_path:
                     try:
-                        img_data_change, bounds_change = raster_to_folium_overlay(change_mask_wgs84_path, colormap='Blues', opacity=0.8)  # Changed from 'hot' to 'Blues'
+                        img_data_change, bounds_change = raster_to_folium_overlay(change_mask_wgs84_path, colormap='pink', opacity=0.8)  # Changed from 'hot' to 'Blues'
                         folium.raster_layers.ImageOverlay(
                             image=img_data_change, 
                             bounds=bounds_change, 
