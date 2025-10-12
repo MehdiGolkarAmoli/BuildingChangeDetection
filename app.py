@@ -38,180 +38,7 @@ warnings.filterwarnings("ignore", message="Examining the path of torch.classes")
 import streamlit as st
 
 # Set page configuration - MUST BE THE FIRST STREAMLIT COMMAND
-st.set_page_config(layout="wide", page_title="ابزار تحلیل تصاویر ماهواره‌ای")
-
-# Add custom CSS for Persian font and styling
-st.markdown("""
-<style>
-@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+Arabic:wght@300;400;500;600;700&display=swap');
-
-/* Main styling */
-.main .block-container {
-    padding-top: 2rem;
-    padding-bottom: 2rem;
-    max-width: 1200px;
-}
-
-/* Persian font styling */
-h1, h2, h3, h4, h5, h6, .stMarkdown, .stText, .stSelectbox label, .stButton > button {
-    font-family: 'Noto Sans Arabic', 'BNazanin', 'Tahoma', sans-serif !important;
-    direction: rtl;
-    text-align: right;
-}
-
-/* Headers with proper sizing */
-h1 {
-    font-size: 2.5rem !important;
-    font-weight: 600 !important;
-    color: #2c3e50 !important;
-    margin-bottom: 1.5rem !important;
-}
-
-h2 {
-    font-size: 2rem !important;
-    font-weight: 500 !important;
-    color: #34495e !important;
-    margin-bottom: 1.2rem !important;
-}
-
-h3 {
-    font-size: 1.5rem !important;
-    font-weight: 500 !important;
-    color: #34495e !important;
-    margin-bottom: 1rem !important;
-}
-
-/* Body text */
-.stMarkdown p {
-    font-size: 1.1rem !important;
-    line-height: 1.8 !important;
-    color: #2c3e50 !important;
-}
-
-/* Sidebar styling */
-.css-1d391kg {
-    background-color: #f8f9fa !important;
-}
-
-/* Button styling */
-.stButton > button {
-    background-color: #3498db !important;
-    color: white !important;
-    border: none !important;
-    border-radius: 8px !important;
-    padding: 0.5rem 1.5rem !important;
-    font-size: 1rem !important;
-    font-weight: 500 !important;
-    transition: all 0.3s ease !important;
-}
-
-.stButton > button:hover {
-    background-color: #2980b9 !important;
-    transform: translateY(-2px) !important;
-    box-shadow: 0 4px 8px rgba(52, 152, 219, 0.3) !important;
-}
-
-/* Success button */
-.stButton > button[kind="primary"] {
-    background-color: #27ae60 !important;
-}
-
-.stButton > button[kind="primary"]:hover {
-    background-color: #229954 !important;
-}
-
-/* Warning and info styling */
-.stAlert {
-    border-radius: 8px !important;
-    border: none !important;
-    padding: 1rem !important;
-}
-
-.stSuccess {
-    background-color: #d4edda !important;
-    border-left: 4px solid #27ae60 !important;
-}
-
-.stWarning {
-    background-color: #fff3cd !important;
-    border-left: 4px solid #f39c12 !important;
-}
-
-.stError {
-    background-color: #f8d7da !important;
-    border-left: 4px solid #e74c3c !important;
-}
-
-.stInfo {
-    background-color: #d1ecf1 !important;
-    border-left: 4px solid #17a2b8 !important;
-}
-
-/* Tab styling */
-.stTabs [data-baseweb="tab-list"] {
-    gap: 8px;
-}
-
-.stTabs [data-baseweb="tab"] {
-    background-color: #ecf0f1 !important;
-    color: #2c3e50 !important;
-    border-radius: 8px 8px 0 0 !important;
-    font-weight: 500 !important;
-    padding: 0.75rem 1.5rem !important;
-}
-
-.stTabs [aria-selected="true"] {
-    background-color: #3498db !important;
-    color: white !important;
-}
-
-/* Selectbox and input styling */
-.stSelectbox > div > div {
-    background-color: white !important;
-    border: 2px solid #bdc3c7 !important;
-    border-radius: 8px !important;
-}
-
-.stSelectbox > div > div:focus-within {
-    border-color: #3498db !important;
-    box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.1) !important;
-}
-
-/* Progress bar styling */
-.stProgress > div > div > div > div {
-    background-color: #3498db !important;
-}
-
-/* Map container styling */
-.folium-map {
-    border-radius: 12px !important;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1) !important;
-}
-
-/* Remove some unnecessary notifications */
-.stToast {
-    display: none !important;
-}
-
-/* Custom card styling */
-.time-selection-card {
-    background-color: #f8f9fa !important;
-    border: 1px solid #dee2e6 !important;
-    border-radius: 12px !important;
-    padding: 1.5rem !important;
-    margin: 1rem 0 !important;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05) !important;
-}
-
-.time-selection-header {
-    font-size: 1.2rem !important;
-    font-weight: 600 !important;
-    color: #2c3e50 !important;
-    margin-bottom: 1rem !important;
-    text-align: center !important;
-}
-</style>
-""", unsafe_allow_html=True)
+st.set_page_config(layout="wide", page_title="Satellite Image Analysis Tool")
 
 # Now import other streamlit-related packages
 import folium
@@ -532,20 +359,8 @@ else:
     4. Set this as an environment variable in your Posit Cloud environment
     """)
     st.stop()
-# Main title
-st.markdown("""
-<div style="text-align: center; margin-bottom: 2rem;">
-    <h1 style="color: #2c3e50; font-size: 3rem; font-weight: 700; margin-bottom: 0.5rem;">
-        🌍 ابزار تحلیل تصاویر ماهواره‌ای
-    </h1>
-    <p style="color: #7f8c8d; font-size: 1.3rem; margin: 0;">
-        تشخیص تغییرات با استفاده از تصاویر سنجش از دور
-    </p>
-</div>
-""", unsafe_allow_html=True)
-
 # Create tabs for different pages
-tab1, tab2, tab3, tab4  = st.tabs(["انتخاب منطقه", "تحلیل تصویر قبل", "تحلیل تصویر بعد", "تشخیص تغییرات"])
+tab1, tab2, tab3, tab4  = st.tabs(["Region Selection", "Before Image Analysis", "After Image Analysis", "Change Detection"])
 
 # Global variables
 if 'drawn_polygons' not in st.session_state:
@@ -1425,10 +1240,10 @@ def process_image(image_path, year, selected_polygon, region_number):
 
 # First tab - Region Selection
 with tab1:
-    st.header("انتخاب منطقه مورد نظر و دوره‌های زمانی")
+    st.header("Select Region of Interest and Time Periods")
     
     # Add warning about region size
-    st.warning("توجه: برای نتایج بهینه، مناطق کوچکتر از 40 کیلومتر مربع را انتخاب کنید. مناطق بزرگتر با استفاده از تایلینگ پردازش خواهند شد که ممکن است زمان بیشتری ببرد.")
+    st.warning("Note: For optimal results, select regions smaller than 40 sq km. Larger areas will be processed using tiling, which may take longer.")
     
     # Create a folium map centered at a default location
     m = folium.Map(location=[35.6892, 51.3890], zoom_start=10) # Default to Tehran
@@ -1473,33 +1288,33 @@ with tab1:
                 # Calculate approximate area in square kilometers
                 area_sq_km = polygon.area * 111 * 111  # Approximate conversion from degrees to km²
                 
-                st.success(f"شکل در منطقه UTM {utm_zone} ({utm_epsg}) ثبت شد! مساحت: ~{area_sq_km:.2f} کیلومتر مربع. برای ذخیره روی 'ذخیره منطقه انتخاب شده' کلیک کنید.")
+                st.success(f"Shape captured in UTM Zone {utm_zone} ({utm_epsg})! Area: ~{area_sq_km:.2f} km². Click 'Save Selected Region' to save it.")
                 
                 # Warn if area is large
                 if area_sq_km > 40:
-                    st.warning(f"منطقه انتخاب شده بزرگ است ({area_sq_km:.2f} کیلومتر مربع). پردازش از تایلینگ برای مدیریت محدودیت اندازه دانلود استفاده خواهد کرد.")
+                    st.warning(f"Selected area is large ({area_sq_km:.2f} km²). Processing will use tiling to handle the download size limit.")
     
     # Add a button to save the drawn polygons
-    if st.button("ذخیره منطقه انتخاب شده"):
+    if st.button("Save Selected Region"):
         if 'last_drawn_polygon' in st.session_state:
             # Check if this polygon is already saved
             if not any(p.equals(st.session_state.last_drawn_polygon) for p in st.session_state.drawn_polygons):
                 st.session_state.drawn_polygons.append(st.session_state.last_drawn_polygon)
-                st.success(f"منطقه ذخیره شد! تعداد کل مناطق: {len(st.session_state.drawn_polygons)}")
+                st.success(f"Region saved! Total regions: {len(st.session_state.drawn_polygons)}")
             else:
-                st.info("این چندضلعی قبلاً ذخیره شده است.")
+                st.info("This polygon is already saved.")
         else:
-            st.warning("لطفاً ابتدا یک چندضلعی روی نقشه رسم کنید")
+            st.warning("Please draw a polygon on the map first")
     
     # For demonstration purposes - keep the manual entry option
-    with st.expander("ورود دستی مختصات چندضلعی (برای تست)"):
+    with st.expander("Manually Enter Polygon Coordinates (For Testing)"):
         col1, col2 = st.columns(2)
         with col1:
-            lat_input = st.text_input("مختصات عرض جغرافیایی (جدا شده با کاما)", "35.68, 35.70, 35.69, 35.68")
+            lat_input = st.text_input("Latitude coordinates (comma separated)", "35.68, 35.70, 35.69, 35.68")
         with col2:
-            lon_input = st.text_input("مختصات طول جغرافیایی (جدا شده با کاما)", "51.38, 51.39, 51.40, 51.38")
+            lon_input = st.text_input("Longitude coordinates (comma separated)", "51.38, 51.39, 51.40, 51.38")
         
-        if st.button("افزودن چندضلعی تست"):
+        if st.button("Add Test Polygon"):
             try:
                 lats = [float(x.strip()) for x in lat_input.split(",")]
                 lons = [float(x.strip()) for x in lon_input.split(",")]
@@ -1516,15 +1331,15 @@ with tab1:
                     # Calculate approximate area
                     area_sq_km = test_polygon.area * 111 * 111  # Approximate conversion from degrees to km²
                     
-                    st.success(f"چندضلعی تست در منطقه UTM {utm_zone} ({utm_epsg}) ایجاد شد! مساحت: ~{area_sq_km:.2f} کیلومتر مربع. برای ذخیره روی 'ذخیره منطقه انتخاب شده' کلیک کنید.")
+                    st.success(f"Test polygon created in UTM Zone {utm_zone} ({utm_epsg})! Area: ~{area_sq_km:.2f} km². Click 'Save Selected Region' to save it.")
                     
                     # Warn if area is large
                     if area_sq_km > 40:
-                        st.warning(f"منطقه انتخاب شده بزرگ است ({area_sq_km:.2f} کیلومتر مربع). پردازش از تایلینگ برای مدیریت محدودیت اندازه دانلود استفاده خواهد کرد.")
+                        st.warning(f"Selected area is large ({area_sq_km:.2f} km²). Processing will use tiling to handle the download size limit.")
                 else:
-                    st.error("لطفاً حداقل 3 جفت مختصات ارائه دهید")
+                    st.error("Please provide at least 3 coordinate pairs")
             except ValueError:
-                st.error("مختصات نامعتبر. لطفاً مقادیر عددی وارد کنید.")
+                st.error("Invalid coordinates. Please enter numeric values.")
 
     # Display saved regions with delete options
     if st.session_state.drawn_polygons:
