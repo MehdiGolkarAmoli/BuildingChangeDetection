@@ -3124,48 +3124,48 @@ def process_image(image_path, year, selected_polygon, region_number):
                             
                             if mask.max() > 1:
                                 binary_mask = (mask > 0).astype(np.uint8)
-            else:
-                binary_mask = mask.astype(np.uint8)
-            
-            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size_val, kernel_size_val))
-            eroded = cv2.erode(binary_mask, kernel, iterations=1)
-            eroded = eroded * 255
-            
-            st.success(f"✅ فرسایش با استفاده از OpenCV و اندازه کرنل {kernel_size_val} اعمال شد")
-            return eroded.astype(mask.dtype)
-            
-        except ImportError:
-            try:
-                from scipy import ndimage
-                from scipy.ndimage import binary_erosion
-                
-                if mask.max() > 1:
-                    binary_mask = (mask > 0).astype(bool)
-                else:
-                    binary_mask = mask.astype(bool)
-                
-                y, x = np.ogrid[-kernel_size_val//2:kernel_size_val//2+1, 
-                                -kernel_size_val//2:kernel_size_val//2+1]
-                kernel = x*x + y*y <= (kernel_size_val//2)**2
-                
-                eroded = binary_erosion(binary_mask, structure=kernel)
-                eroded = eroded.astype(np.uint8) * 255
-                
-                st.success(f"✅ فرسایش با استفاده از SciPy و اندازه کرنل {kernel_size_val} اعمال شد")
-                return eroded.astype(mask.dtype)
-                
-            except ImportError:
-                st.warning("OpenCV و SciPy در دسترس نیستند. استفاده از فرسایش دستی (کندتر).")
-                
-                if mask.max() > 1:
-                    binary_mask = (mask > 0).astype(np.uint8)
-                else:
-                    binary_mask = mask.astype(np.uint8)
-                
-                eroded = np.zeros_like(binary_mask)
-                pad_size = kernel_size_val // 2
-                
-                padded = np.pad(binary_mask, pad_size, mode='constant', constant_values=0)
+                            else:
+                                binary_mask = mask.astype(np.uint8)
+                            
+                            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size_val, kernel_size_val))
+                            eroded = cv2.erode(binary_mask, kernel, iterations=1)
+                            eroded = eroded * 255
+                            
+                            st.success(f"✅ فرسایش با استفاده از OpenCV و اندازه کرنل {kernel_size_val} اعمال شد")
+                            return eroded.astype(mask.dtype)
+                            
+                        except ImportError:
+                            try:
+                                from scipy import ndimage
+                                from scipy.ndimage import binary_erosion
+                                
+                                if mask.max() > 1:
+                                    binary_mask = (mask > 0).astype(bool)
+                                else:
+                                    binary_mask = mask.astype(bool)
+                                
+                                y, x = np.ogrid[-kernel_size_val//2:kernel_size_val//2+1, 
+                                                -kernel_size_val//2:kernel_size_val//2+1]
+                                kernel = x*x + y*y <= (kernel_size_val//2)**2
+                                
+                                eroded = binary_erosion(binary_mask, structure=kernel)
+                                eroded = eroded.astype(np.uint8) * 255
+                                
+                                st.success(f"✅ فرسایش با استفاده از SciPy و اندازه کرنل {kernel_size_val} اعمال شد")
+                                return eroded.astype(mask.dtype)
+                                
+                            except ImportError:
+                                st.warning("OpenCV و SciPy در دسترس نیستند. استفاده از فرسایش دستی (کندتر).")
+                                
+                                if mask.max() > 1:
+                                    binary_mask = (mask > 0).astype(np.uint8)
+                                else:
+                                    binary_mask = mask.astype(np.uint8)
+                                
+                                eroded = np.zeros_like(binary_mask)
+                                pad_size = kernel_size_val // 2
+                                
+                                padded = np.pad(binary_mask, pad_size, mode='constant', constant_values=0)
                 
                 for i in range(binary_mask.shape[0]):
                     for j in range(binary_mask.shape[1]):
