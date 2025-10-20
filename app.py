@@ -3095,35 +3095,35 @@ def process_image(image_path, year, selected_polygon, region_number):
                         st.warning(f"نمی‌توان لایه ماسک تغییرات را اضافه کرد: {str(e)}")
 
                 ## Fourth tab - Change Detection
-with tab4:
-    st.header("🔍 تشخیص تغییرات ساختمانی")
-    
-    # Import required libraries
-    import tempfile
-    import os
-    import time
-    import rasterio
-    from rasterio.warp import calculate_default_transform, reproject, Resampling
-    from rasterio.mask import mask
-    from shapely.geometry import mapping, box
-    import io
-    from PIL import Image
-    import folium
-    from folium import plugins
-    import streamlit.components.v1 as components
-    import json
-    import geopandas as gpd
-    import base64
-    import numpy as np
-    import matplotlib.pyplot as plt
-    
-    # Enhanced erosion function
-    def apply_erosion(mask, kernel_size_val):
-        try:
-            import cv2
-            
-            if mask.max() > 1:
-                binary_mask = (mask > 0).astype(np.uint8)
+                with tab4:
+                    st.header("🔍 تشخیص تغییرات ساختمانی")
+                    
+                    # Import required libraries
+                    import tempfile
+                    import os
+                    import time
+                    import rasterio
+                    from rasterio.warp import calculate_default_transform, reproject, Resampling
+                    from rasterio.mask import mask
+                    from shapely.geometry import mapping, box
+                    import io
+                    from PIL import Image
+                    import folium
+                    from folium import plugins
+                    import streamlit.components.v1 as components
+                    import json
+                    import geopandas as gpd
+                    import base64
+                    import numpy as np
+                    import matplotlib.pyplot as plt
+                    
+                    # Enhanced erosion function
+                    def apply_erosion(mask, kernel_size_val):
+                        try:
+                            import cv2
+                            
+                            if mask.max() > 1:
+                                binary_mask = (mask > 0).astype(np.uint8)
             else:
                 binary_mask = mask.astype(np.uint8)
             
