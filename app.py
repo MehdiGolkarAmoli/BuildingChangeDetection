@@ -1449,7 +1449,7 @@ with tab1:
             # Year dropdown for "Before" image
             before_year = st.selectbox(
                 "Select Year",
-                options=["2019", "2020", "2021", "2022", "2023", "2024"],
+                options=["2019", "2020", "2021", "2022", "2023", "2024", '2025'],
                 index=2,  # Default to 2021
                 key="before_year_select"
             )
@@ -1469,7 +1469,7 @@ with tab1:
             # Year dropdown for "After" image
             after_year = st.selectbox(
                 "Select Year",
-                options=["2019", "2020", "2021", "2022", "2023", "2024"],
+                options=["2019", "2020", "2021", "2022", "2023", "2024", '2025'],
                 index=5,  # Default to 2024
                 key="after_year_select"
             )
@@ -2362,3 +2362,4 @@ with tab4: # This line is commented out as the code below is the content of tab4
             st.error(traceback.format_exc())
     else:
         st.info("After applying erosion, the interactive map will appear here.")
+
